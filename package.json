@@ -1,0 +1,22 @@
+{
+  "name": "hotel-chaos-simulator",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n web,api \"npm run dev -w apps/web\" \"npm run dev -w apps/api\"",
+    "build": "npm run build --workspaces",
+    "build:api": "npm run build -w @hotel-chaos/shared && npm run build -w api",
+    "db:migrate": "npm run db:migrate -w api",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "concurrently": "^9",
+    "typescript": "~5.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
