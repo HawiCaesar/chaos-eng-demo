@@ -1,8 +1,11 @@
 import express from "express";
 import cors from "cors";
+import { closeAuditPool } from "./db/auditPool.js";
 import { closePool } from "./db/pool.js";
 import { env } from "./env.js";
 import { errorHandler } from "./errors.js";
+import { requestIdMiddleware } from "./middleware/requestId.js";
+import { auditRouter } from "./routes/audit.js";
 import { bookingsRouter } from "./routes/bookings.js";
 import { healthRouter } from "./routes/health.js";
 
@@ -10,8 +13,10 @@ const app = express();
 
 app.use(cors({ origin: env.WEB_ORIGIN }));
 app.use(express.json());
+app.use(requestIdMiddleware);
 
 app.use(healthRouter);
+app.use(auditRouter);
 app.use(bookingsRouter);
 app.use(errorHandler);
 
@@ -31,6 +36,7 @@ const handleShutdown = (): void => {
       });
     });
     await closePool();
+    await closeAuditPool();
     process.exit(0);
   })().catch((error) => {
     console.error("shutdown failed", error);

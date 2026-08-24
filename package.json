@@ -10,6 +10,7 @@
     "build": "npm run build --workspaces",
     "build:api": "npm run build -w @hotel-chaos/shared && npm run build -w api",
     "db:migrate": "npm run db:migrate -w api",
+    "db:migrate:audit": "npm run db:migrate:audit -w api",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
   "devDependencies": {

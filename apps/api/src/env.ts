@@ -12,9 +12,17 @@ if (!parsed.DATABASE_URL) {
   throw new Error("DATABASE_URL is required for the booking API");
 }
 
-export type ApiEnv = Env & { DATABASE_URL: string };
+if (!parsed.AUDIT_DATABASE_URL) {
+  throw new Error("AUDIT_DATABASE_URL is required for the booking API");
+}
+
+export type ApiEnv = Env & {
+  DATABASE_URL: string;
+  AUDIT_DATABASE_URL: string;
+};
 
 export const env: ApiEnv = {
   ...parsed,
   DATABASE_URL: parsed.DATABASE_URL,
+  AUDIT_DATABASE_URL: parsed.AUDIT_DATABASE_URL,
 };

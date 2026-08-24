@@ -23,7 +23,7 @@ npm run dev
 | Web | http://localhost:5173 | `apps/web` |
 | API | http://localhost:3001 | `apps/api` |
 
-Health check: `curl http://localhost:3001/health` (M2: response includes `"database":"up"` when Postgres is reachable).
+Health check: `curl http://localhost:3001/health` (M3: `"database"` and `"auditDatabase"` when Postgres instances are reachable).
 
 Build shared once before first web dev (or after changing `packages/shared`):
 
@@ -38,7 +38,8 @@ npm run build -w @hotel-chaos/shared
 | `npm run dev` | Web + API together (concurrently) |
 | `npm run build` | Build all workspaces |
 | `npm run build:api` | Build shared + API only (Railway deploy) |
-| `npm run db:migrate` | Apply SQL migrations in `apps/api/db/migrations/` |
+| `npm run db:migrate` | Apply primary SQL migrations in `apps/api/db/migrations/` |
+| `npm run db:migrate:audit` | Apply audit SQL migrations in `apps/api/db/audit-migrations/` |
 | `npm run typecheck` | Typecheck all workspaces |
 
 Environment: [`.env.example`](.env.example) (full list). API → `parseEnv()` via `apps/api/src/env.ts`; web → `import.meta.env.VITE_*` only.
@@ -78,9 +79,44 @@ curl -s "$API/bookings/BK-xxxx" | jq .
 # replace BK-xxxx with bookingId from POST response
 ```
 
+## Milestone 3 — audit event system
+
+Use a **second Railway Postgres** for audit events. The API writes an ordered trail on every `POST /bookings` and can still write to audit when the primary DB is down.
+
+1. **Audit database URL** — Railway → **audit Postgres** service → Variables → copy **`DATABASE_PUBLIC_URL`** into `apps/api/.env` as **`AUDIT_DATABASE_URL`**. The API **will not start** without it (same as `DATABASE_URL`).
+
+2. **Audit migrations** (once per environment):
+
+   ```bash
+   npm run db:migrate:audit
+   ```
+
+3. **Verify trail** — create a booking and fetch events by `X-Request-ID`:
+
+   ```bash
+   API=http://localhost:3001
+
+   curl -si -X POST "$API/bookings" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "guestName": "Hawi Odhiambo",
+       "email": "hawi@example.com",
+       "roomId": "101",
+       "checkIn": "2026-09-01",
+       "checkOut": "2026-09-03"
+     }' | tee /tmp/booking-response.txt
+
+   REQ=$(grep -i '^x-request-id:' /tmp/booking-response.txt | awk '{print $2}' | tr -d '\r')
+   curl -s "$API/audit/events?requestId=$REQ" | jq .
+   ```
+
+   Expect four events in order: `REQUEST_RECEIVED` → `VALIDATION_PASSED` → `BOOKING_ATTEMPTED` → `BOOKING_CREATED`.
+
+See [`IMPLEMENTATION_MILESTONE_3.md`](IMPLEMENTATION_MILESTONE_3.md) and [`docs/railway.md`](docs/railway.md) (Milestone 3 section).
+
 ## Railway
 
-M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** API connects to Postgres; run migrations and set `DATABASE_URL` on **booking-api** (see below).
+M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**.
 
 **Full checklist, tokens, troubleshooting:** [`docs/railway.md`](docs/railway.md)
 
@@ -135,3 +171,13 @@ See [`plan.md`](plan.md) and [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for milest
 | Fetch | `GET /bookings/BK-xxxx` and details page |
 | Validation | Invalid form → 400 / inline errors |
 | Infra | Bad DB URL → `database:"down"` on health; POST → 503 on connection errors where mapped |
+
+## Milestone 3 verification
+
+| Check | How |
+|-------|-----|
+| `AUDIT_DATABASE_URL` | Set in `apps/api/.env` (second Railway Postgres) |
+| Audit migrate | `npm run db:migrate:audit` succeeds |
+| Health | `GET /health` → `"auditDatabase":"up"` when audit DB reachable |
+| Trail | `POST /bookings` + `GET /audit/events?requestId=` → four ordered events |
+| Correlation | Response header `X-Request-ID` matches audit `requestId` |

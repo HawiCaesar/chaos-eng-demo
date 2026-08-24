@@ -1,14 +1,22 @@
 import { createBookingSchema } from "@hotel-chaos/shared";
 import { Router } from "express";
+import { recordAuditEvent } from "../audit/recordAuditEvent.js";
 import {
   findBookingByPublicId,
   insertBooking,
 } from "../db/bookingsRepository.js";
-import { zodValidationDetails } from "../errors.js";
+import { isDatabaseUnavailable, zodValidationDetails } from "../errors.js";
 
 export const bookingsRouter = Router();
 
 bookingsRouter.post("/bookings", async (req, res, next) => {
+  const requestId = req.requestId;
+
+  await recordAuditEvent({
+    eventType: "REQUEST_RECEIVED",
+    requestId,
+  });
+
   const parsed = createBookingSchema.safeParse(req.body);
 
   if (!parsed.success) {
@@ -19,13 +27,40 @@ bookingsRouter.post("/bookings", async (req, res, next) => {
     return;
   }
 
+  await recordAuditEvent({
+    eventType: "VALIDATION_PASSED",
+    requestId,
+  });
+
+  await recordAuditEvent({
+    eventType: "BOOKING_ATTEMPTED",
+    requestId,
+  });
+
   try {
     const booking = await insertBooking(parsed.data);
+
+    await recordAuditEvent({
+      eventType: "BOOKING_CREATED",
+      requestId,
+      bookingId: booking.bookingId,
+    });
+
     res.status(201).json({
       status: booking.status,
       bookingId: booking.bookingId,
     });
   } catch (error) {
+    if (isDatabaseUnavailable(error)) {
+      await recordAuditEvent(
+        { eventType: "DATABASE_UNAVAILABLE", requestId },
+        { critical: true },
+      );
+      await recordAuditEvent(
+        { eventType: "BOOKING_FAILED", requestId },
+        { critical: true },
+      );
+    }
     next(error);
   }
 });
