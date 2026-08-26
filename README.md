@@ -141,7 +141,7 @@ curl -s "https://booking-api-production-25be.up.railway.app/health"
 apps/web/                 Vite + React + React Router v7
 apps/api/                 Express 5 API
 packages/shared/          Shared Zod schemas, env, booking types
-packages/railway-client/  Placeholder (Milestone 4)
+packages/railway-client/  Railway GraphQL client — see IMPLEMENTATION_MILESTONE_4.md; smoke: npm run railway:smoke
 railway.json              API deploy config (root)
 docs/railway.md           Project/service IDs and Railway steps
 ```
@@ -181,3 +181,13 @@ See [`plan.md`](plan.md) and [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for milest
 | Health | `GET /health` → `"auditDatabase":"up"` when audit DB reachable |
 | Trail | `POST /bookings` + `GET /audit/events?requestId=` → four ordered events |
 | Correlation | Response header `X-Request-ID` matches audit `requestId` |
+
+## Milestone 4 verification
+
+| Check | How |
+|-------|-----|
+| Package | [`IMPLEMENTATION_MILESTONE_4.md`](IMPLEMENTATION_MILESTONE_4.md) — `@hotel-chaos/railway-client` |
+| Local env | `RAILWAY_*` token + IDs in `apps/api/.env` ([`docs/railway.md`](docs/railway.md#ids-and-urls)) |
+| Smoke | `npm run railway:smoke` → primary Postgres `RUNNING` / `SUCCESS` when healthy |
+| Chaos (optional) | `npm run railway:smoke -- --execute-stop-restart`; bookings 503 while primary DB stopped |
+| Docs | [`docs/railway.md`](docs/railway.md#milestone-4--railway-graphql-client) |

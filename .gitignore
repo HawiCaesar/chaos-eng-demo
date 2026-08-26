@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 .railway
+apps/web/.env
+apps/api/.env
