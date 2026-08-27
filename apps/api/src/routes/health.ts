@@ -1,26 +1,15 @@
 import { Router } from "express";
 import { getAuditPool } from "../db/auditPool.js";
 import { getPool } from "../db/pool.js";
+import { probeDatabase } from "../db/probe.js";
 
 export const healthRouter = Router();
 
 healthRouter.get("/health", async (_req, res) => {
-  let database: "up" | "down" = "down";
-  let auditDatabase: "up" | "down" = "down";
-
-  try {
-    await getPool().query("SELECT 1");
-    database = "up";
-  } catch {
-    database = "down";
-  }
-
-  try {
-    await getAuditPool().query("SELECT 1");
-    auditDatabase = "up";
-  } catch {
-    auditDatabase = "down";
-  }
+  const [database, auditDatabase] = await Promise.all([
+    probeDatabase(getPool()),
+    probeDatabase(getAuditPool()),
+  ]);
 
   res.status(200).json({
     status: "ok",

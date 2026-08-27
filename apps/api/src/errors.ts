@@ -1,4 +1,5 @@
 import type { NextFunction, Request, Response } from "express";
+import { RailwayClientError } from "@hotel-chaos/railway-client";
 import type { ZodError } from "zod";
 
 const NODE_CONNECTION_CODES = new Set([
@@ -59,6 +60,14 @@ export const errorHandler = (
     res.status(503).json({
       code: "DATABASE_UNAVAILABLE",
       message: "Database is unavailable",
+    });
+    return;
+  }
+
+  if (error instanceof RailwayClientError) {
+    res.status(502).json({
+      code: "RAILWAY_UNAVAILABLE",
+      message: error.message,
     });
     return;
   }

@@ -114,6 +114,14 @@ Use a **second Railway Postgres** for audit events. The API writes an ordered tr
 
 See [`IMPLEMENTATION_MILESTONE_3.md`](IMPLEMENTATION_MILESTONE_3.md) and [`docs/railway.md`](docs/railway.md) (Milestone 3 section).
 
+## Milestone 5 — chaos control dashboard (in progress)
+
+The API now requires Railway config at boot: `RAILWAY_API_TOKEN`, `RAILWAY_ENVIRONMENT_ID`, and service IDs for primary Postgres (`RAILWAY_PRIMARY_DB_SERVICE_ID`), audit Postgres (`RAILWAY_AUDIT_DB_SERVICE_ID`), and booking-api itself (`RAILWAY_API_SERVICE_ID`) — real IDs in [`docs/railway.md`](docs/railway.md#ids-and-urls). Set them in `apps/api/.env` locally and on the deployed **booking-api** service, or the API will refuse to start. `build:api` now builds `shared` → `railway-client` → `api`.
+
+See [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md). `/infrastructure` endpoints and the `/chaos` dashboard land in the remaining steps.
+
+Note on statuses: `STOPPING` and `STARTING` exist in the shared `ServiceLifecycleStatus` enum, but Railway never returns them — they are UI overlay states shown while a stop/restart is in flight. The API only ever emits statuses mapped from real Railway deployment statuses (`RUNNING` / `STOPPED` / `FAILED`).
+
 ## Railway
 
 M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**.

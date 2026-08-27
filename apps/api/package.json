@@ -12,6 +12,7 @@
     "db:migrate:audit": "tsx src/db/auditMigrate.ts"
   },
   "dependencies": {
+    "@hotel-chaos/railway-client": "*",
     "@hotel-chaos/shared": "*",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

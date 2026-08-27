@@ -7,7 +7,10 @@ let pool: pg.Pool | null = null;
 
 export const getPool = (): pg.Pool => {
   if (!pool) {
-    pool = new Pool({ connectionString: env.DATABASE_URL });
+    pool = new Pool({
+      connectionString: env.DATABASE_URL,
+      connectionTimeoutMillis: 2_000,
+    });
   }
   return pool;
 };

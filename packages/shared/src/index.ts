@@ -10,6 +10,16 @@ export {
   type ListAuditEventsResponse,
 } from "./audit.js";
 export {
+  infrastructureServiceKeySchema,
+  infrastructureServiceStatusSchema,
+  infrastructureStatusResponseSchema,
+  serviceLifecycleStatusSchema,
+  type InfrastructureServiceKey,
+  type InfrastructureServiceStatus,
+  type InfrastructureStatusResponse,
+  type ServiceLifecycleStatus,
+} from "./infrastructure.js";
+export {
   bookingSchema,
   bookingStatusSchema,
   createBookingResponseSchema,

@@ -3,6 +3,7 @@ import type {
   Booking,
   CreateBookingInput,
   CreateBookingResponse,
+  InfrastructureStatusResponse,
 } from "@hotel-chaos/shared";
 
 export class ApiError extends Error {
@@ -22,6 +23,17 @@ export type HealthResponse = {
   service: string;
   timestamp: string;
   database: "up" | "down";
+  auditDatabase: "up" | "down";
+};
+
+export type PrimaryDbStopResponse = {
+  key: "primary-db";
+  action: "stop";
+};
+
+export type PrimaryDbRestartResponse = {
+  key: "primary-db";
+  action: "restart";
 };
 
 export const getApiBaseUrl = (): string => {
@@ -72,3 +84,16 @@ export const createBooking = async (
 
 export const getBooking = async (bookingId: string): Promise<Booking> =>
   requestJson<Booking>(`/bookings/${encodeURIComponent(bookingId)}`);
+
+export const getInfrastructure = async (): Promise<InfrastructureStatusResponse> =>
+  requestJson<InfrastructureStatusResponse>("/infrastructure");
+
+export const stopPrimaryDb = async (): Promise<PrimaryDbStopResponse> =>
+  requestJson<PrimaryDbStopResponse>("/infrastructure/primary-db/stop", {
+    method: "POST",
+  });
+
+export const restartPrimaryDb = async (): Promise<PrimaryDbRestartResponse> =>
+  requestJson<PrimaryDbRestartResponse>("/infrastructure/primary-db/restart", {
+    method: "POST",
+  });

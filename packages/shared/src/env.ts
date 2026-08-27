@@ -10,6 +10,8 @@ const envSchema = z.object({
   RAILWAY_PROJECT_ID: z.string().optional(),
   RAILWAY_ENVIRONMENT_ID: z.string().optional(),
   RAILWAY_PRIMARY_DB_SERVICE_ID: z.string().optional(),
+  RAILWAY_AUDIT_DB_SERVICE_ID: z.string().optional(),
+  RAILWAY_API_SERVICE_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

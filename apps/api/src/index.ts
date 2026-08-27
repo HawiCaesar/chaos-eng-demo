@@ -8,6 +8,7 @@ import { requestIdMiddleware } from "./middleware/requestId.js";
 import { auditRouter } from "./routes/audit.js";
 import { bookingsRouter } from "./routes/bookings.js";
 import { healthRouter } from "./routes/health.js";
+import { infrastructureRouter } from "./routes/infrastructure.js";
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use(requestIdMiddleware);
 app.use(healthRouter);
 app.use(auditRouter);
 app.use(bookingsRouter);
+app.use(infrastructureRouter);
 app.use(errorHandler);
 
 const server = app.listen(env.PORT, () => {

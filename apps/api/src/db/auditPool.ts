@@ -7,7 +7,10 @@ let auditPool: pg.Pool | null = null;
 
 export const getAuditPool = (): pg.Pool => {
   if (!auditPool) {
-    auditPool = new Pool({ connectionString: env.AUDIT_DATABASE_URL });
+    auditPool = new Pool({
+      connectionString: env.AUDIT_DATABASE_URL,
+      connectionTimeoutMillis: 2_000,
+    });
   }
   return auditPool;
 };
