@@ -220,7 +220,7 @@ export const BookingPage = () => {
         </button>
       </form>
 
-      <footer className="mt-auto pt-8">
+      <footer className="pt-8">
         <div
           className="flex flex-wrap items-center gap-2 text-sm text-slate-600"
           aria-label="API health"
