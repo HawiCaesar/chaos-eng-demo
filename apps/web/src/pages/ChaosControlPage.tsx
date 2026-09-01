@@ -48,6 +48,7 @@ export const ChaosControlPage = () => {
     queryKey: ["infrastructure"],
     queryFn: getInfrastructure,
     refetchInterval: pendingAction !== null ? 1000 : 3000,
+    retry: 1,
   });
 
   const primary = data?.services.find((service) => service.key === "primary-db");
@@ -88,7 +89,7 @@ export const ChaosControlPage = () => {
     try {
       await stopPrimaryDb();
       setPendingAction("stop");
-      await refetch();
+      void refetch();
     } catch (caught) {
       setActionError(
         caught instanceof ApiError
@@ -109,7 +110,7 @@ export const ChaosControlPage = () => {
     try {
       await restartPrimaryDb();
       setPendingAction("restart");
-      await refetch();
+      void refetch();
     } catch (caught) {
       setActionError(
         caught instanceof ApiError
@@ -144,7 +145,7 @@ export const ChaosControlPage = () => {
         Stop targets Railway primary Postgres. Bookings will return 503 until you restart it.
       </p>
 
-      {isPending && (
+      {isPending && !isError && (
         <div className="mt-8 animate-pulse space-y-4" aria-busy="true" aria-label="Loading infrastructure">
           <div className="h-24 rounded-lg bg-slate-200" />
           <div className="h-24 rounded-lg bg-slate-200" />

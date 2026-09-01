@@ -28,21 +28,42 @@ export const zodValidationDetails = (error: ZodError): Record<string, string[]> 
 };
 
 export const isDatabaseUnavailable = (error: unknown): boolean => {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
+  if (typeof error !== "object" || error === null) {
     return false;
   }
 
-  const code = String((error as { code: unknown }).code);
+  if ("code" in error && error.code != null && String(error.code) !== "") {
+    const code = String((error as { code: unknown }).code);
 
-  if (NODE_CONNECTION_CODES.has(code)) {
-    return true;
+    if (NODE_CONNECTION_CODES.has(code)) {
+      return true;
+    }
+
+    if (code.startsWith(PG_CONNECTION_CLASS_PREFIX)) {
+      return true;
+    }
+
+    if (PG_UNAVAILABLE_CODES.has(code)) {
+      return true;
+    }
   }
 
-  if (code.startsWith(PG_CONNECTION_CLASS_PREFIX)) {
-    return true;
+  if (error instanceof Error) {
+    const message = error.message.toLowerCase();
+    if (
+      message.includes("connection terminated") ||
+      message.includes("connection timeout") ||
+      message.includes("not queryable")
+    ) {
+      return true;
+    }
+
+    if (error.cause !== undefined) {
+      return isDatabaseUnavailable(error.cause);
+    }
   }
 
-  return PG_UNAVAILABLE_CODES.has(code);
+  return false;
 };
 
 export const errorHandler = (

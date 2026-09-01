@@ -114,13 +114,13 @@ Use a **second Railway Postgres** for audit events. The API writes an ordered tr
 
 See [`IMPLEMENTATION_MILESTONE_3.md`](IMPLEMENTATION_MILESTONE_3.md) and [`docs/railway.md`](docs/railway.md) (Milestone 3 section).
 
-## Milestone 5 — chaos control dashboard (in progress)
+## Milestone 5 — chaos control dashboard
 
-The API now requires Railway config at boot: `RAILWAY_API_TOKEN`, `RAILWAY_ENVIRONMENT_ID`, and service IDs for primary Postgres (`RAILWAY_PRIMARY_DB_SERVICE_ID`), audit Postgres (`RAILWAY_AUDIT_DB_SERVICE_ID`), and booking-api itself (`RAILWAY_API_SERVICE_ID`) — real IDs in [`docs/railway.md`](docs/railway.md#ids-and-urls). Set them in `apps/api/.env` locally and on the deployed **booking-api** service, or the API will refuse to start. `build:api` now builds `shared` → `railway-client` → `api`.
+Infrastructure screen at **`/chaos`**. The Booking API owns Railway (`GET /infrastructure`, `POST .../primary-db/stop|restart`). Local web must use `VITE_API_URL=http://localhost:3001` in `apps/web/.env`.
 
-See [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md). `/infrastructure` endpoints and the `/chaos` dashboard land in the remaining steps.
+The API **requires** at boot: `RAILWAY_API_TOKEN`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_PRIMARY_DB_SERVICE_ID`, `RAILWAY_AUDIT_DB_SERVICE_ID`, `RAILWAY_API_SERVICE_ID` — IDs in [`docs/railway.md`](docs/railway.md#ids-and-urls). Set them in `apps/api/.env` **and** on the deployed **booking-api** service before shipping this milestone, or production will not start. `build:api` builds `shared` → `railway-client` → `api`. Mutations are unauthenticated; Stop breaks bookings until Restart.
 
-Note on statuses: `STOPPING` and `STARTING` exist in the shared `ServiceLifecycleStatus` enum, but Railway never returns them — they are UI overlay states shown while a stop/restart is in flight. The API only ever emits statuses mapped from real Railway deployment statuses (`RUNNING` / `STOPPED` / `FAILED`).
+`STOPPING` / `STARTING` are UI overlays while a stop/restart is in flight. Database card `status` is a SQL probe (`SELECT 1`); Railway `rawDeploymentStatus` can stay `SUCCESS` after stop. Details: [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md).
 
 ## Railway
 
@@ -199,3 +199,13 @@ See [`plan.md`](plan.md) and [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for milest
 | Smoke | `npm run railway:smoke` → primary Postgres `RUNNING` / `SUCCESS` when healthy |
 | Chaos (optional) | `npm run railway:smoke -- --execute-stop-restart`; bookings 503 while primary DB stopped |
 | Docs | [`docs/railway.md`](docs/railway.md#milestone-4--railway-graphql-client) |
+
+## Milestone 5 verification
+
+| Check | How |
+|-------|-----|
+| Types / build | `npm run typecheck`; `npm run build:api` (shared → railway-client → api) |
+| Dashboard | http://localhost:5173/chaos — three cards; Stop/Restart only on Primary DB |
+| Stop | Primary `STOPPED` (raw may be `SUCCESS`); `POST /bookings` → 503 `DATABASE_UNAVAILABLE` |
+| Restart | Primary `RUNNING`; booking → 201 |
+| Docs | Audit Postgres service ID in [`docs/railway.md`](docs/railway.md#ids-and-urls); [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md) |

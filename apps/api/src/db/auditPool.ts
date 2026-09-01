@@ -11,6 +11,9 @@ export const getAuditPool = (): pg.Pool => {
       connectionString: env.AUDIT_DATABASE_URL,
       connectionTimeoutMillis: 2_000,
     });
+    auditPool.on("error", (error) => {
+      console.error("audit database pool error", error);
+    });
   }
   return auditPool;
 };

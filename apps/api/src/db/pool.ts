@@ -11,6 +11,9 @@ export const getPool = (): pg.Pool => {
       connectionString: env.DATABASE_URL,
       connectionTimeoutMillis: 2_000,
     });
+    pool.on("error", (error) => {
+      console.error("primary database pool error", error);
+    });
   }
   return pool;
 };

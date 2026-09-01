@@ -266,6 +266,8 @@ FAILED
 
 The dashboard should poll or refresh Railway state after lifecycle operations.
 
+For the two databases, the displayed lifecycle is **connectivity** (`SELECT 1`, same probe as `GET /health`), not Railway’s latest deployment status alone. Railway can report `SUCCESS` while the container is stopped. Audit event writes are best-effort; a down audit DB should not fail bookings if primary is up. Details: [IMPLEMENTATION_MILESTONE_5.md](IMPLEMENTATION_MILESTONE_5.md) (Known behavior).
+
 ### Milestone 6: Database Outage Experiment
 
 Implement the first controlled chaos scenario.
