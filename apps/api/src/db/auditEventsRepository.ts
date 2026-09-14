@@ -71,6 +71,7 @@ export const insertAuditEvent = async (
 export const listAuditEvents = async (filters: {
   requestId?: string;
   bookingId?: string;
+  experimentId?: string;
 }): Promise<AuditEvent[]> => {
   const conditions: string[] = [];
   const values: string[] = [];
@@ -83,6 +84,11 @@ export const listAuditEvents = async (filters: {
   if (filters.bookingId) {
     values.push(filters.bookingId);
     conditions.push(`booking_id = $${values.length}`);
+  }
+
+  if (filters.experimentId) {
+    values.push(filters.experimentId);
+    conditions.push(`experiment_id = $${values.length}`);
   }
 
   const whereClause =

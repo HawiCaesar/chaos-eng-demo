@@ -1,11 +1,10 @@
 import { createBookingSchema } from "@hotel-chaos/shared";
 import { Router } from "express";
 import { recordAuditEvent } from "../audit/recordAuditEvent.js";
-import {
-  findBookingByPublicId,
-  insertBooking,
-} from "../db/bookingsRepository.js";
-import { isDatabaseUnavailable, zodValidationDetails } from "../errors.js";
+import { executeCreateBooking } from "../bookings/executeCreateBooking.js";
+import { findBookingByPublicId } from "../db/bookingsRepository.js";
+import { getActiveExperimentId } from "../experiments/store.js";
+import { zodValidationDetails } from "../errors.js";
 
 export const bookingsRouter = Router();
 
@@ -15,6 +14,7 @@ bookingsRouter.post("/bookings", async (req, res, next) => {
   await recordAuditEvent({
     eventType: "REQUEST_RECEIVED",
     requestId,
+    experimentId: getActiveExperimentId(),
   });
 
   const parsed = createBookingSchema.safeParse(req.body);
@@ -27,40 +27,14 @@ bookingsRouter.post("/bookings", async (req, res, next) => {
     return;
   }
 
-  await recordAuditEvent({
-    eventType: "VALIDATION_PASSED",
-    requestId,
-  });
-
-  await recordAuditEvent({
-    eventType: "BOOKING_ATTEMPTED",
-    requestId,
-  });
-
   try {
-    const booking = await insertBooking(parsed.data);
-
-    await recordAuditEvent({
-      eventType: "BOOKING_CREATED",
-      requestId,
-      bookingId: booking.bookingId,
-    });
+    const booking = await executeCreateBooking(parsed.data, requestId);
 
     res.status(201).json({
       status: booking.status,
       bookingId: booking.bookingId,
     });
   } catch (error) {
-    if (isDatabaseUnavailable(error)) {
-      await recordAuditEvent(
-        { eventType: "DATABASE_UNAVAILABLE", requestId },
-        { critical: true },
-      );
-      await recordAuditEvent(
-        { eventType: "BOOKING_FAILED", requestId },
-        { critical: true },
-      );
-    }
     next(error);
   }
 });

@@ -27,6 +27,7 @@ export type AuditEvent = z.infer<typeof auditEventSchema>;
 export const listAuditEventsQuerySchema = z.object({
   requestId: z.string().uuid().optional(),
   bookingId: z.string().min(1).optional(),
+  experimentId: z.string().min(1).optional(),
 });
 
 export type ListAuditEventsQuery = z.infer<typeof listAuditEventsQuerySchema>;

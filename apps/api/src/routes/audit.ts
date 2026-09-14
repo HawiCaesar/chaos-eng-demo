@@ -15,17 +15,22 @@ auditRouter.get("/audit/events", async (req, res, next) => {
     return;
   }
 
-  const { requestId, bookingId } = parsed.data;
+  const { requestId, bookingId, experimentId } = parsed.data;
 
-  if (!requestId && !bookingId) {
+  if (!requestId && !bookingId && !experimentId) {
     res.status(400).json({
-      message: "At least one of requestId or bookingId is required",
+      message:
+        "At least one of requestId, bookingId, or experimentId is required",
     });
     return;
   }
 
   try {
-    const events = await listAuditEvents({ requestId, bookingId });
+    const events = await listAuditEvents({
+      requestId,
+      bookingId,
+      experimentId,
+    });
     res.status(200).json({ events });
   } catch (error) {
     next(error);

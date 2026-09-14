@@ -1,3 +1,4 @@
+import { RailwayClientError } from "../errors.js";
 import { postGraphQL } from "../graphqlRequest.js";
 
 /**
@@ -35,11 +36,17 @@ export const mutationDeploymentStop = async (
 ): Promise<void> => {
   const { apiToken, deploymentId } = options;
 
-  await postGraphQL<DeploymentStopResponse>({
+  const data = await postGraphQL<DeploymentStopResponse>({
     apiToken,
     query: DEPLOYMENT_STOP_MUTATION,
     variables: { id: deploymentId },
   });
+
+  if (!data.deploymentStop) {
+    throw new RailwayClientError(
+      `deploymentStop returned false for deploymentId=${deploymentId}`,
+    );
+  }
 };
 
 export const mutationDeploymentRestart = async (
@@ -47,9 +54,15 @@ export const mutationDeploymentRestart = async (
 ): Promise<void> => {
   const { apiToken, deploymentId } = options;
 
-  await postGraphQL<DeploymentRestartResponse>({
+  const data = await postGraphQL<DeploymentRestartResponse>({
     apiToken,
     query: DEPLOYMENT_RESTART_MUTATION,
     variables: { id: deploymentId },
   });
+
+  if (!data.deploymentRestart) {
+    throw new RailwayClientError(
+      `deploymentRestart returned false for deploymentId=${deploymentId}`,
+    );
+  }
 };

@@ -29,3 +29,25 @@ export {
   type CreateBookingInput,
   type CreateBookingResponse,
 } from "./booking.js";
+export {
+  createExperimentBodySchema,
+  experimentScenarioSchema,
+  experimentSchema,
+  experimentStatusHistoryEntrySchema,
+  experimentStatusSchema,
+  type CreateExperimentBody,
+  type Experiment,
+  type ExperimentScenario,
+  type ExperimentStatus,
+  type ExperimentStatusHistoryEntry,
+} from "./experiment.js";
+export {
+  experimentTimelineResponseSchema,
+  timelineEventKindSchema,
+  timelineEventSchema,
+  timelineEventSourceSchema,
+  type ExperimentTimelineResponse,
+  type TimelineEvent,
+  type TimelineEventKind,
+  type TimelineEventSource,
+} from "./timeline.js";
