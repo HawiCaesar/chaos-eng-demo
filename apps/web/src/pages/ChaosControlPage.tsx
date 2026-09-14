@@ -1,9 +1,34 @@
-import type { InfrastructureServiceStatus, ServiceLifecycleStatus } from "@hotel-chaos/shared";
-import { useQuery } from "@tanstack/react-query";
+import type {
+  ExperimentStatus,
+  InfrastructureServiceStatus,
+  ServiceLifecycleStatus,
+} from "@hotel-chaos/shared";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
-import { ApiError, getInfrastructure, restartPrimaryDb, stopPrimaryDb } from "../lib/api";
+import {
+  ApiError,
+  createExperiment,
+  getCurrentExperiment,
+  getExperiment,
+  getInfrastructure,
+  restartPrimaryDb,
+  startExperiment,
+  stopPrimaryDb,
+} from "../lib/api";
 
 type PendingAction = "stop" | "restart" | null;
+
+const TERMINAL_EXPERIMENT_STATUSES: ExperimentStatus[] = ["COMPLETED", "FAILED"];
+
+const isExperimentInFlightStatus = (status: ExperimentStatus | undefined): boolean => {
+  if (!status) {
+    return false;
+  }
+  if (status === "CREATED") {
+    return false;
+  }
+  return !TERMINAL_EXPERIMENT_STATUSES.includes(status);
+};
 
 const displayedLifecycle = (
   service: InfrastructureServiceStatus,
@@ -38,17 +63,69 @@ const statusToneClass = (status: ServiceLifecycleStatus): { dot: string; text: s
   }
 };
 
+const experimentStatusToneClass = (
+  status: ExperimentStatus,
+): { dot: string; text: string } => {
+  if (status === "COMPLETED") {
+    return { dot: "bg-emerald-500", text: "text-emerald-800" };
+  }
+  if (status === "FAILED") {
+    return { dot: "bg-red-500", text: "text-red-800" };
+  }
+  return { dot: "bg-amber-500", text: "text-amber-900" };
+};
+
 export const ChaosControlPage = () => {
   const headingId = useId();
+  const experimentSectionId = useId();
+  const experimentStatusId = useId();
+  const queryClient = useQueryClient();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [experimentRunInFlight, setExperimentRunInFlight] = useState(false);
+  const [experimentRunError, setExperimentRunError] = useState<string | null>(null);
+  const [trackedExperimentId, setTrackedExperimentId] = useState<string | null>(null);
 
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ["infrastructure"],
     queryFn: getInfrastructure,
     refetchInterval: pendingAction !== null ? 1000 : 3000,
     retry: 1,
+  });
+
+  const { data: currentInFlight } = useQuery({
+    queryKey: ["experiment", "current"],
+    queryFn: async () => {
+      try {
+        return await getCurrentExperiment();
+      } catch (caught) {
+        if (caught instanceof ApiError && caught.status === 404) {
+          return null;
+        }
+        throw caught;
+      }
+    },
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (currentInFlight?.id) {
+      setTrackedExperimentId(currentInFlight.id);
+    }
+  }, [currentInFlight?.id]);
+
+  const { data: experiment } = useQuery({
+    queryKey: ["experiment", trackedExperimentId],
+    queryFn: () => getExperiment(trackedExperimentId!),
+    enabled: trackedExperimentId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      if (!status || !isExperimentInFlightStatus(status)) {
+        return false;
+      }
+      return 1000;
+    },
   });
 
   const primary = data?.services.find((service) => service.key === "primary-db");
@@ -73,6 +150,37 @@ export const ChaosControlPage = () => {
   const handleRetry = () => {
     setActionError(null);
     void refetch();
+  };
+
+  const handleRunExperiment = async () => {
+    const confirmed = window.confirm(
+      "This run stops primary Postgres, submits one booking that should fail with DATABASE_UNAVAILABLE, restarts the database, then submits one booking that should succeed. Continue?",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setExperimentRunInFlight(true);
+    setExperimentRunError(null);
+
+    try {
+      const created = await createExperiment({});
+      const started = await startExperiment(created.id);
+      setTrackedExperimentId(started.id);
+      queryClient.setQueryData(["experiment", started.id], started);
+      void queryClient.invalidateQueries({ queryKey: ["experiment", "current"] });
+      void queryClient.invalidateQueries({ queryKey: ["experiment", started.id] });
+    } catch (caught) {
+      setExperimentRunError(
+        caught instanceof ApiError
+          ? caught.body.message
+          : caught instanceof Error
+            ? caught.message
+            : "Experiment failed to start",
+      );
+    } finally {
+      setExperimentRunInFlight(false);
+    }
   };
 
   const handleStop = async () => {
@@ -134,7 +242,16 @@ export const ChaosControlPage = () => {
         : "Could not load infrastructure status"
     : null;
 
-  const actionsLocked = pendingAction !== null || actionInFlight;
+  const experimentInFlight = isExperimentInFlightStatus(experiment?.status);
+  const actionsLocked =
+    pendingAction !== null ||
+    actionInFlight ||
+    experimentInFlight ||
+    experimentRunInFlight;
+
+  const experimentTone = experiment
+    ? experimentStatusToneClass(experiment.status)
+    : null;
 
   return (
     <main className="mx-auto min-h-screen max-w-lg px-6 py-12">
@@ -144,6 +261,72 @@ export const ChaosControlPage = () => {
       <p className="mt-2 text-slate-600">
         Stop targets Railway primary Postgres. Bookings will return 503 until you restart it.
       </p>
+
+      <section
+        className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+        aria-labelledby={experimentSectionId}
+      >
+        <h2 id={experimentSectionId} className="text-sm font-medium text-slate-500">
+          Database outage experiment
+        </h2>
+        <p className="mt-2 text-sm text-slate-600">
+          Fully automated: stop primary Postgres, one failed booking, restart, one successful booking.
+        </p>
+
+        {experiment && experimentTone && (
+          <div className="mt-4 space-y-2">
+            <p className="font-mono text-xs text-slate-500">{experiment.id}</p>
+            <div
+              id={experimentStatusId}
+              className="flex items-center gap-2"
+              aria-live="polite"
+            >
+              <span
+                className={`h-2.5 w-2.5 shrink-0 rounded-full ${experimentTone.dot}`}
+                aria-hidden="true"
+              />
+              <span className={`text-lg font-semibold ${experimentTone.text}`}>
+                {experiment.status}
+              </span>
+            </div>
+            {experiment.status === "FAILED" && experiment.error && (
+              <p className="text-sm text-red-800" role="alert">
+                {experiment.error}
+              </p>
+            )}
+            {experiment.failureRequestId && (
+              <p className="font-mono text-xs text-slate-600">
+                Failure request: {experiment.failureRequestId}
+              </p>
+            )}
+            {experiment.recoveryBookingId && (
+              <p className="font-mono text-xs text-slate-600">
+                Recovery booking: {experiment.recoveryBookingId}
+              </p>
+            )}
+          </div>
+        )}
+
+        {experimentRunError && (
+          <div
+            className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-red-950"
+            role="alert"
+          >
+            <p className="text-sm font-medium">Experiment could not start</p>
+            <p className="mt-1 text-sm">{experimentRunError}</p>
+          </div>
+        )}
+
+        <button
+          type="button"
+          aria-label="Run database outage experiment"
+          disabled={experimentInFlight || experimentRunInFlight}
+          onClick={() => void handleRunExperiment()}
+          className="mt-4 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Run database outage experiment
+        </button>
+      </section>
 
       {isPending && !isError && (
         <div className="mt-8 animate-pulse space-y-4" aria-busy="true" aria-label="Loading infrastructure">

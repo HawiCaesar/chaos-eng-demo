@@ -1,9 +1,13 @@
 import type {
   ApiErrorBody,
+  AuditEvent,
   Booking,
   CreateBookingInput,
   CreateBookingResponse,
+  CreateExperimentBody,
+  Experiment,
   InfrastructureStatusResponse,
+  ListAuditEventsResponse,
 } from "@hotel-chaos/shared";
 
 export class ApiError extends Error {
@@ -97,3 +101,31 @@ export const restartPrimaryDb = async (): Promise<PrimaryDbRestartResponse> =>
   requestJson<PrimaryDbRestartResponse>("/infrastructure/primary-db/restart", {
     method: "POST",
   });
+
+export const createExperiment = async (
+  body: CreateExperimentBody = {},
+): Promise<Experiment> =>
+  requestJson<Experiment>("/experiments", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+
+export const startExperiment = async (id: string): Promise<Experiment> =>
+  requestJson<Experiment>(`/experiments/${encodeURIComponent(id)}/start`, {
+    method: "POST",
+  });
+
+export const getExperiment = async (id: string): Promise<Experiment> =>
+  requestJson<Experiment>(`/experiments/${encodeURIComponent(id)}`);
+
+export const getCurrentExperiment = async (): Promise<Experiment> =>
+  requestJson<Experiment>("/experiments/current");
+
+export const getExperimentEvents = async (
+  id: string,
+): Promise<{ events: AuditEvent[] }> => {
+  const response = await requestJson<ListAuditEventsResponse>(
+    `/experiments/${encodeURIComponent(id)}/events`,
+  );
+  return { events: response.events };
+};

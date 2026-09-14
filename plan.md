@@ -311,6 +311,8 @@ GET  /experiments/:id
 GET  /experiments/:id/events
 ```
 
+Experiment **run state** is in-process for MVP; **audit events** with `experimentId` are the durable record. Persisted experiment history is deferred. Details: [IMPLEMENTATION_MILESTONE_6.md](IMPLEMENTATION_MILESTONE_6.md) (Ephemeral experiment envelope vs durable audit trail).
+
 ### Milestone 7: Experiment Timeline
 
 Create a timeline from audit and infrastructure events.

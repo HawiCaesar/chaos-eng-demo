@@ -227,6 +227,46 @@ Local web: `VITE_API_URL=http://localhost:3001` in `apps/web/.env` (restart Vite
 
 ---
 
+## Milestone 6 — database outage experiment
+
+The Booking API runs a **full-auto database-outage scenario** server-side. The web app calls HTTP only (no `@hotel-chaos/railway-client` in the browser). Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos) — **Run database outage experiment**. Implementation: [`IMPLEMENTATION_MILESTONE_6.md`](../IMPLEMENTATION_MILESTONE_6.md).
+
+**`/experiments` mutations are unauthenticated** (same posture as M5 `/infrastructure` stop/restart). One experiment at a time (`409` if another is `CREATED` or in flight).
+
+### In-memory store vs durable audit
+
+| Layer | Where | Survives API restart? |
+| ----- | ----- | --------------------- |
+| Experiment envelope (`status`, `error`, ids) | In-process `Map` | **No** — `GET /experiments/:id` may 404 after restart |
+| Evidence (`audit_events.experiment_id`) | Audit Postgres | **Yes** |
+| Verification booking (`BK-…`) | Primary Postgres | **Yes** |
+
+Run `npm run db:migrate:audit` once per environment for index `audit_events_experiment_id_created_at_idx`.
+
+### Probe-based waits (not Railway deploy status)
+
+The orchestrator calls `railwayClient.stopService` / `restartService` on **primary Postgres** (same service ID as M5), then waits on **`probeDatabase`** (`SELECT 1` on primary) — not on `rawDeploymentStatus`. Railway deploy records often stay `SUCCESS` after stop; container logs may show “Stopping container” / “Mounting volume” while the API waits for probe `down` / `up`. Timeouts: **120s** down, **180s** up; poll every **2s**.
+
+`POST /experiments/:id/start` returns **202** immediately; the scenario runs in the background. Railway failures during the run become experiment **`FAILED`** + `error`, not a late HTTP 502 on GET.
+
+### Process crash
+
+If the **API process dies mid-run**, experiment state is lost and primary Postgres may stay **stopped**. Recover manually from `/chaos` (**Restart Database**) or `POST /infrastructure/primary-db/restart`. On **`FAILED`** after a successful stop, the orchestrator **best-effort** restarts primary so the demo DB is not left down.
+
+### Experiment endpoints
+
+| Method | Path | Notes |
+| ------ | ---- | ----- |
+| `POST` | `/experiments` | **201** `CREATED`; body `{}` or `{ "scenario": "database-outage" }` |
+| `POST` | `/experiments/:id/start` | **202**; background run begins at `STOPPING_DATABASE` |
+| `GET` | `/experiments/current` | In-flight experiment or **404** (no active run) |
+| `GET` | `/experiments/:id` | Live envelope while process holds the Map |
+| `GET` | `/experiments/:id/events` | Audit rows for `experimentId` (same shape as `GET /audit/events`) |
+
+Manual M5 routes remain for dashboard use; disable Stop/Restart in the UI while an experiment is in flight so they do not race the orchestrator.
+
+---
+
 ## Verification
 
 
@@ -346,6 +386,31 @@ curl -s "$API/infrastructure" | jq '.services[] | {key, status, rawDeploymentSta
 
 **Pass criteria:** three services in order; primary has `actions: ["stop","restart"]`; audit and booking-api have empty `actions`. From `/chaos`, Stop → primary `STOPPED` (raw may stay `SUCCESS`) → bookings **503** → Restart → bookings **201**.
 
+### Milestone 6 — database outage experiment
+
+Same M5 `RAILWAY_*` vars and local `apps/api/.env`. Apply audit migration if needed:
+
+```bash
+npm run db:migrate:audit
+npm run dev
+# Web: http://localhost:5173/chaos
+# API: http://localhost:3001
+
+API=http://localhost:3001
+
+EXP=$(curl -s -X POST "$API/experiments" -H "Content-Type: application/json" -d '{}' | jq -r .id)
+echo "$EXP"
+
+curl -si -X POST "$API/experiments/$EXP/start"
+
+# poll until COMPLETED or FAILED (often 1–3 minutes)
+curl -s "$API/experiments/$EXP" | jq '{id, status, error, failureRequestId, recoveryBookingId}'
+
+curl -s "$API/experiments/$EXP/events" | jq '.events[] | {eventType, experimentId, requestId, bookingId}'
+```
+
+**Pass criteria:** UI run reaches **`COMPLETED`** with `recoveryBookingId`; events include `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED` for the same `experimentId`; manual Stop/Restart disabled during the run; after `COMPLETED`, normal bookings **201** and primary probe **up**. See [Milestone 6 — database outage experiment](#milestone-6--database-outage-experiment) for store/probe/crash notes.
+
 ---
 ### Find IDs for Milestone 4 / 5
 
@@ -361,7 +426,7 @@ Dashboard: Project → Settings; each service → Settings.
 
 ## IDs and URLs
 
-Used by Milestone 4 smoke tests and Milestone 5 `/infrastructure` routes.
+Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Milestone 6 experiment orchestrator (primary DB stop/restart).
 
 | Item                        | Value                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------- |

@@ -122,9 +122,43 @@ The API **requires** at boot: `RAILWAY_API_TOKEN`, `RAILWAY_ENVIRONMENT_ID`, `RA
 
 `STOPPING` / `STARTING` are UI overlays while a stop/restart is in flight. Database card `status` is a SQL probe (`SELECT 1`); Railway `rawDeploymentStatus` can stay `SUCCESS` after stop. Details: [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md).
 
+## Milestone 6 — database outage experiment
+
+Automated chaos scenario from **`/chaos`**: **Run database outage experiment** (confirm → create → start). The API orchestrator stops primary Postgres, submits a synthetic booking that must fail, restarts the DB, then verifies with a successful booking. Poll live **`status`** on the page (~1s while in flight). Manual Stop/Restart stay disabled during a run.
+
+Implementation: [`IMPLEMENTATION_MILESTONE_6.md`](IMPLEMENTATION_MILESTONE_6.md). Railway notes: [`docs/railway.md`](docs/railway.md#milestone-6--database-outage-experiment).
+
+**Experiment run state** lives in an **in-memory Map** in the API (lost on restart). **Audit events** with `experimentId` and the verification **booking** on primary Postgres are the durable trail. Experiment endpoints are **unauthenticated** (same as M5 infra mutations).
+
+Run audit migration once if you have not since M6:
+
+```bash
+npm run db:migrate:audit
+```
+
+### Local experiment smoke (curl)
+
+```bash
+npm run dev
+# Web: http://localhost:5173/chaos
+# API: http://localhost:3001
+
+API=http://localhost:3001
+
+EXP=$(curl -s -X POST "$API/experiments" -H "Content-Type: application/json" -d '{}' | jq -r .id)
+echo "$EXP"
+
+curl -si -X POST "$API/experiments/$EXP/start"
+
+# poll until COMPLETED or FAILED (often 1–3 minutes)
+curl -s "$API/experiments/$EXP" | jq '{id, status, error, failureRequestId, recoveryBookingId}'
+
+curl -s "$API/experiments/$EXP/events" | jq '.events[] | {eventType, experimentId, requestId, bookingId}'
+```
+
 ## Railway
 
-M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**.
+M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**. **M6:** automated database-outage experiments via `/experiments*` (in-memory state; audit + bookings as evidence).
 
 **Full checklist, tokens, troubleshooting:** [`docs/railway.md`](docs/railway.md)
 
@@ -209,3 +243,13 @@ See [`plan.md`](plan.md) and [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for milest
 | Stop | Primary `STOPPED` (raw may be `SUCCESS`); `POST /bookings` → 503 `DATABASE_UNAVAILABLE` |
 | Restart | Primary `RUNNING`; booking → 201 |
 | Docs | Audit Postgres service ID in [`docs/railway.md`](docs/railway.md#ids-and-urls); [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md) |
+
+## Milestone 6 verification
+
+| Check | How |
+|-------|-----|
+| Audit migrate | `npm run db:migrate:audit` applies `002_index_experiment_id` |
+| UI | http://localhost:5173/chaos — **Run database outage experiment**; status progresses to `COMPLETED`; manual Stop/Restart disabled while in flight |
+| API | `POST /experiments` → 201 `CREATED`; `POST .../start` → 202; poll `GET /experiments/:id` (see curl above) |
+| Audit trail | `GET /experiments/:id/events` includes `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED` with same `experimentId` |
+| Docs | [`IMPLEMENTATION_MILESTONE_6.md`](IMPLEMENTATION_MILESTONE_6.md); [`docs/railway.md`](docs/railway.md#milestone-6--database-outage-experiment) |
