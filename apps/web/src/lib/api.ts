@@ -6,6 +6,7 @@ import type {
   CreateBookingResponse,
   CreateExperimentBody,
   Experiment,
+  ExperimentTimelineResponse,
   InfrastructureStatusResponse,
   ListAuditEventsResponse,
 } from "@hotel-chaos/shared";
@@ -129,3 +130,10 @@ export const getExperimentEvents = async (
   );
   return { events: response.events };
 };
+
+export const getExperimentTimeline = async (
+  id: string,
+): Promise<ExperimentTimelineResponse> =>
+  requestJson<ExperimentTimelineResponse>(
+    `/experiments/${encodeURIComponent(id)}/timeline`,
+  );

@@ -1,4 +1,5 @@
 import type {
+  Experiment,
   ExperimentStatus,
   InfrastructureServiceStatus,
   ServiceLifecycleStatus,
@@ -10,6 +11,7 @@ import {
   createExperiment,
   getCurrentExperiment,
   getExperiment,
+  getExperimentTimeline,
   getInfrastructure,
   restartPrimaryDb,
   startExperiment,
@@ -63,6 +65,23 @@ const statusToneClass = (status: ServiceLifecycleStatus): { dot: string; text: s
   }
 };
 
+const formatTimelineTime = (isoTimestamp: string): string => {
+  const date = new Date(isoTimestamp);
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+};
+
+const experimentPollIntervalMs = (status: ExperimentStatus | undefined): number | false => {
+  if (!status || !isExperimentInFlightStatus(status)) {
+    return false;
+  }
+  return 1000;
+};
+
 const experimentStatusToneClass = (
   status: ExperimentStatus,
 ): { dot: string; text: string } => {
@@ -79,6 +98,8 @@ export const ChaosControlPage = () => {
   const headingId = useId();
   const experimentSectionId = useId();
   const experimentStatusId = useId();
+  const timelineSectionId = useId();
+  const timelineListId = useId();
   const queryClient = useQueryClient();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
@@ -119,12 +140,26 @@ export const ChaosControlPage = () => {
     queryKey: ["experiment", trackedExperimentId],
     queryFn: () => getExperiment(trackedExperimentId!),
     enabled: trackedExperimentId !== null,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (!status || !isExperimentInFlightStatus(status)) {
-        return false;
-      }
-      return 1000;
+    refetchInterval: (query) =>
+      experimentPollIntervalMs(query.state.data?.status),
+  });
+
+  const {
+    data: timeline,
+    isPending: isTimelinePending,
+    isError: isTimelineError,
+    error: timelineError,
+    refetch: refetchTimeline,
+  } = useQuery({
+    queryKey: ["experiment", trackedExperimentId, "timeline"],
+    queryFn: () => getExperimentTimeline(trackedExperimentId!),
+    enabled: trackedExperimentId !== null,
+    refetchInterval: () => {
+      const cached = queryClient.getQueryData<Experiment>([
+        "experiment",
+        trackedExperimentId,
+      ]);
+      return experimentPollIntervalMs(cached?.status ?? experiment?.status);
     },
   });
 
@@ -152,6 +187,10 @@ export const ChaosControlPage = () => {
     void refetch();
   };
 
+  const handleRetryTimeline = () => {
+    void refetchTimeline();
+  };
+
   const handleRunExperiment = async () => {
     const confirmed = window.confirm(
       "This run stops primary Postgres, submits one booking that should fail with DATABASE_UNAVAILABLE, restarts the database, then submits one booking that should succeed. Continue?",
@@ -170,6 +209,9 @@ export const ChaosControlPage = () => {
       queryClient.setQueryData(["experiment", started.id], started);
       void queryClient.invalidateQueries({ queryKey: ["experiment", "current"] });
       void queryClient.invalidateQueries({ queryKey: ["experiment", started.id] });
+      void queryClient.invalidateQueries({
+        queryKey: ["experiment", started.id, "timeline"],
+      });
     } catch (caught) {
       setExperimentRunError(
         caught instanceof ApiError
@@ -253,6 +295,22 @@ export const ChaosControlPage = () => {
     ? experimentStatusToneClass(experiment.status)
     : null;
 
+  const timelineErrorMessage = isTimelineError
+    ? timelineError instanceof ApiError
+      ? timelineError.body.message
+      : timelineError instanceof Error
+        ? timelineError.message
+        : "Could not load experiment timeline"
+    : null;
+
+  const showTimelineSection = trackedExperimentId !== null;
+  const timelineEvents = timeline?.events ?? [];
+  const showNoTimelineYet =
+    !isTimelinePending &&
+    !isTimelineError &&
+    timelineEvents.length === 0 &&
+    (experiment?.status === "CREATED" || experiment === undefined);
+
   return (
     <main className="mx-auto min-h-screen max-w-lg px-6 py-12">
       <h1 id={headingId} className="text-2xl font-semibold tracking-tight text-slate-900">
@@ -327,6 +385,79 @@ export const ChaosControlPage = () => {
           Run database outage experiment
         </button>
       </section>
+
+      {showTimelineSection && (
+        <section
+          className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+          aria-labelledby={timelineSectionId}
+        >
+          <h2 id={timelineSectionId} className="text-sm font-medium text-slate-900">
+            Experiment {trackedExperimentId}
+          </h2>
+
+          {isTimelineError && (
+            <div
+              className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-red-950"
+              role="alert"
+            >
+              <p className="text-sm font-medium">Could not load timeline</p>
+              <p className="mt-1 text-sm">{timelineErrorMessage}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                onClick={handleRetryTimeline}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {isTimelinePending && !isTimelineError && (
+            <p className="mt-4 text-sm text-slate-500" aria-busy="true">
+              Loading timeline…
+            </p>
+          )}
+
+          {showNoTimelineYet && (
+            <p className="mt-4 text-sm text-slate-500">No timeline yet</p>
+          )}
+
+          {!isTimelinePending && !isTimelineError && timelineEvents.length > 0 && (
+            <ol
+              id={timelineListId}
+              className="mt-4 space-y-2"
+              aria-live="polite"
+              aria-label="Experiment timeline"
+            >
+              {timelineEvents.map((event) => (
+                <li
+                  key={event.id}
+                  className="flex flex-col gap-0.5 border-b border-slate-100 pb-2 last:border-b-0 last:pb-0 sm:flex-row sm:items-baseline sm:gap-3"
+                >
+                  <time
+                    dateTime={event.timestamp}
+                    className="shrink-0 font-mono text-xs tabular-nums text-slate-500"
+                  >
+                    {formatTimelineTime(event.timestamp)}
+                  </time>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm text-slate-900">{event.label}</p>
+                    {event.source === "audit" && (event.bookingId || event.requestId) && (
+                      <p className="mt-0.5 font-mono text-xs text-slate-500">
+                        {event.bookingId && <span>Booking {event.bookingId}</span>}
+                        {event.bookingId && event.requestId && (
+                          <span aria-hidden="true"> · </span>
+                        )}
+                        {event.requestId && <span>Request {event.requestId}</span>}
+                      </p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
+      )}
 
       {isPending && !isError && (
         <div className="mt-8 animate-pulse space-y-4" aria-busy="true" aria-label="Loading infrastructure">
