@@ -1,10 +1,12 @@
 import {
   createExperimentBodySchema,
+  experimentMetricsResponseSchema,
   experimentSchema,
   experimentTimelineResponseSchema,
 } from "@hotel-chaos/shared";
 import { Router } from "express";
 import { listAuditEvents } from "../db/auditEventsRepository.js";
+import { composeMetrics } from "../experiments/metrics.js";
 import { startExperiment } from "../experiments/orchestrator.js";
 import { composeTimeline } from "../experiments/timeline.js";
 import {
@@ -100,6 +102,19 @@ experimentsRouter.get("/experiments/:id/timeline", async (req, res, next) => {
     res
       .status(200)
       .json(experimentTimelineResponseSchema.parse(timeline));
+  } catch (error) {
+    next(error);
+  }
+});
+
+experimentsRouter.get("/experiments/:id/metrics", async (req, res, next) => {
+  try {
+    const metrics = await composeMetrics(req.params.id);
+    if (!metrics) {
+      res.status(404).json({ message: "Experiment not found" });
+      return;
+    }
+    res.status(200).json(experimentMetricsResponseSchema.parse(metrics));
   } catch (error) {
     next(error);
   }

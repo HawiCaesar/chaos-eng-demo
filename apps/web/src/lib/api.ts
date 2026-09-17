@@ -6,6 +6,7 @@ import type {
   CreateBookingResponse,
   CreateExperimentBody,
   Experiment,
+  ExperimentMetricsResponse,
   ExperimentTimelineResponse,
   InfrastructureStatusResponse,
   ListAuditEventsResponse,
@@ -136,4 +137,11 @@ export const getExperimentTimeline = async (
 ): Promise<ExperimentTimelineResponse> =>
   requestJson<ExperimentTimelineResponse>(
     `/experiments/${encodeURIComponent(id)}/timeline`,
+  );
+
+export const getExperimentMetrics = async (
+  id: string,
+): Promise<ExperimentMetricsResponse> =>
+  requestJson<ExperimentMetricsResponse>(
+    `/experiments/${encodeURIComponent(id)}/metrics`,
   );

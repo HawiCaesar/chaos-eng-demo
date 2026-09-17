@@ -348,6 +348,10 @@ Railway service state
 Recovery
 ```
 
+`GET /experiments/:id/timeline` is the single source for the list. The UI renders the array; it does **not** merge audit + status itself.
+
+Envelope labels (`Experiment started`, `Database stopping`, …) come from in-memory `statusHistory` and are lost on API restart. Curated audit rows (`BOOKING_ATTEMPTED`, `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED`) are durable. `REQUEST_RECEIVED` and `VALIDATION_PASSED` stay on `GET /experiments/:id/events` only. Details: [IMPLEMENTATION_MILESTONE_7.md](IMPLEMENTATION_MILESTONE_7.md) (Envelope vs durable audit trail).
+
 ### Milestone 8: Recovery Metrics
 
 Calculate a small set of useful experiment metrics:

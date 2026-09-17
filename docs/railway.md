@@ -267,6 +267,101 @@ Manual M5 routes remain for dashboard use; disable Stop/Restart in the UI while 
 
 ---
 
+## Milestone 7 — experiment timeline
+
+The Booking API **composes** a chronological timeline from the M6 in-memory envelope plus curated audit rows. The web app polls HTTP only (it does not merge sources in the browser). Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos) — timeline panel below the experiment run. Implementation: [`IMPLEMENTATION_MILESTONE_7.md`](../IMPLEMENTATION_MILESTONE_7.md).
+
+**`GET /experiments/:id/timeline` is unauthenticated** (same posture as M5/M6). `GET /experiments/:id/events` remains the full audit list (`REQUEST_RECEIVED` / `VALIDATION_PASSED` included). The timeline omits those two types.
+
+No new GraphQL. Timeline “Railway service state” is orchestrator statuses (`STOPPING_DATABASE`, `DATABASE_DOWN`, `RECOVERING_DATABASE`), not live `/infrastructure` poll deltas. M5 cards on `/chaos` stay the live connectivity view.
+
+### Envelope vs durable audit
+
+| Layer | Where | Survives API restart? |
+| ----- | ----- | --------------------- |
+| Envelope steps (`Experiment started`, `Database stopping`, `Database stopped`, `Database restart initiated`, `Experiment completed` / `failed`) | In-process `statusHistory` | **No** — those lines disappear |
+| Curated audit (`BOOKING_ATTEMPTED`, `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED` → **Booking succeeded**) | Audit Postgres | **Yes** |
+
+After an API restart:
+
+- Map miss + audit rows for that `experimentId` → **200** **audit-only** timeline (no “Experiment started”).
+- Neither Map nor audit rows → **404** `{ message: "Experiment not found" }`.
+- `GET /experiments/:id/events` still **404s** when the in-memory experiment is gone (M6).
+
+If both envelope `DATABASE_RECOVERED` and audit `DATABASE_RECOVERED` exist, the composer **drops the envelope copy**. At most one “Database recovered” line.
+
+### Timeline endpoint
+
+| Method | Path | Notes |
+| ------ | ---- | ----- |
+| `GET` | `/experiments/:id/timeline` | **200** `{ experimentId, events }` or **404**; `events` sorted by `timestamp` (envelope before audit on ties, then stable `id`) |
+
+Poll cadence on `/chaos` matches experiment status (~1s in-flight, else 3s or pause when terminal). Empty list while `CREATED` and not started: UI shows “No timeline yet”.
+
+---
+
+## Milestone 8 — recovery metrics
+
+The Booking API **composes** a summary object from the same merged timeline as M7 (envelope `statusHistory` + curated audit). The web app polls HTTP only; it does **not** derive counts or durations from the timeline array in the browser. Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos) — **Recovery metrics** panel below the timeline. Implementation: [`IMPLEMENTATION_MILESTONE_8.md`](../IMPLEMENTATION_MILESTONE_8.md).
+
+**`GET /experiments/:id/metrics` is unauthenticated** (same posture as M5–M7). Metrics are **not persisted** (no `experiments` table).
+
+### `/metrics` vs `/timeline` vs `/events`
+
+| Endpoint | Job | Shape |
+| -------- | --- | ----- |
+| `GET /experiments/:id/events` | Full audit trail for `experimentId` | `{ events: AuditEvent[] }` — includes `REQUEST_RECEIVED`, `VALIDATION_PASSED`, etc. Requires in-memory experiment (**404** on Map miss, even if audit exists). |
+| `GET /experiments/:id/timeline` | Curated chronological narrative | `{ experimentId, events: TimelineEvent[] }` — envelope + curated audit kinds only. |
+| `GET /experiments/:id/metrics` | Recovery summary | Counts, failure rate %, downtime/recovery seconds, `result` display enum. |
+
+The metrics composer reuses `buildTimelineFromSources` internally so envelope + audit merge stays in one place.
+
+### 404 vs partial (same rule as M7 timeline)
+
+| Situation | `/metrics` | `GET /experiments/:id` |
+| --------- | ---------- | ------------------------ |
+| Envelope present (normal demo) | **200** full or in-flight (`null` durations until both timestamps exist) | **200** live `status` |
+| Envelope gone, audit rows remain (API restarted) | **200 partial** — counts work; `recoveryTimeSeconds` usually **null** (restart-initiated is envelope-only); `result: UNKNOWN`; downtime may use audit fallback | **404** (M6) |
+| Neither envelope nor audit | **404** `{ message: "Experiment not found" }` | **404** |
+
+Partial means HTTP **200** with holes — not 206, not 404.
+
+### `result` vs experiment `status`
+
+| Resource | Field | Values |
+| -------- | ----- | ------ |
+| `GET /experiments/:id` | `status` | M6 enum: `CREATED`, `STOPPING_DATABASE`, …, `COMPLETED`, `FAILED` |
+| `GET /experiments/:id/metrics` | `result` | `RECOVERED` \| `FAILED` \| `IN_PROGRESS` \| `UNKNOWN` |
+
+Mapping: envelope `COMPLETED` → metrics `RECOVERED`; envelope `FAILED` → `FAILED`; other envelope → `IN_PROGRESS`; no envelope → `UNKNOWN`. The `/chaos` run panel still shows **`COMPLETED`**, not `RECOVERED`.
+
+### Duration and request formulas (server-side)
+
+All formulas run in the API (`buildMetricsFromTimeline`). Seconds = `Math.round(ms / 1000)`; missing endpoint or negative delta → `null`. Open intervals while the run is in flight stay `null` (UI shows `—`); the UI does not live-tick from `Date.now()`.
+
+| Field | Rule |
+| ----- | ---- |
+| `totalRequests` | Unique non-null `requestId` on timeline kind `BOOKING_ATTEMPTED` |
+| `successfulRequests` | Unique `requestId` on `BOOKING_SUCCEEDED` |
+| `failedRequests` | Unique `requestId` on `BOOKING_FAILED` (if same id also succeeded, count as successful only) |
+| `failureRatePercent` | `round(failed / total * 100)` if `total > 0`, else `null` |
+| `databaseDowntimeSeconds` | First `DATABASE_STOPPED` → first `DATABASE_RECOVERED`; else first `DATABASE_UNAVAILABLE` → first `DATABASE_RECOVERED` |
+| `recoveryTimeSeconds` | First `DATABASE_RESTART_INITIATED` → first `DATABASE_RECOVERED` (no fallback) |
+
+Extra human `POST /bookings` during the in-flight window (M6 `experimentId` stamping) **do** count toward request totals. Audit `DATABASE_RECOVERED` uses its own `requestId` and does not add to booking attempt counts.
+
+### Metrics endpoint
+
+| Method | Path | Notes |
+| ------ | ---- | ----- |
+| `GET` | `/experiments/:id/metrics` | **200** summary JSON or **404**; registered beside `/timeline` (before `GET /experiments/:id`) |
+
+Poll cadence on `/chaos` matches the timeline (~1s in-flight, pause when terminal).
+
+No new GraphQL or Railway IDs for M8.
+
+---
+
 ## Verification
 
 
@@ -411,6 +506,59 @@ curl -s "$API/experiments/$EXP/events" | jq '.events[] | {eventType, experimentI
 
 **Pass criteria:** UI run reaches **`COMPLETED`** with `recoveryBookingId`; events include `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED` for the same `experimentId`; manual Stop/Restart disabled during the run; after `COMPLETED`, normal bookings **201** and primary probe **up**. See [Milestone 6 — database outage experiment](#milestone-6--database-outage-experiment) for store/probe/crash notes.
 
+### Milestone 7 — experiment timeline
+
+Same M5 `RAILWAY_*` vars and a completed (or in-flight) M6 run. Local:
+
+```bash
+npm run db:migrate:audit
+npm run dev
+# Web: http://localhost:5173/chaos
+# API: http://localhost:3001
+
+API=http://localhost:3001
+
+EXP=$(curl -s -X POST "$API/experiments" -H "Content-Type: application/json" -d '{}' | jq -r .id)
+echo "$EXP"
+
+curl -si -X POST "$API/experiments/$EXP/start"
+
+# poll until COMPLETED or FAILED (often 1–3 minutes)
+curl -s "$API/experiments/$EXP" | jq '{id, status}'
+
+curl -s "$API/experiments/$EXP/timeline" | jq '.events[] | {timestamp, kind, label, source}'
+
+curl -s "$API/experiments/$EXP/events" | jq '.events[] | {eventType}'
+```
+
+**Pass criteria:** `/timeline` labels match the plan.md narrative (started, stopping, stopped, booking attempted, `DATABASE_UNAVAILABLE`, booking failed, restart initiated, recovered, booking succeeded, completed); `REQUEST_RECEIVED` and `VALIDATION_PASSED` appear only on `/events`; at most one “Database recovered”; `/chaos` list updates while in flight. After API process restart, `/timeline` for an old `EXP-` is audit-only if audit rows exist, or 404 if not. See [Milestone 7 — experiment timeline](#milestone-7--experiment-timeline).
+
+### Milestone 8 — recovery metrics
+
+Same M5 `RAILWAY_*` vars and a completed (or in-flight) M6 run. Local:
+
+```bash
+npm run db:migrate:audit
+npm run build -w @hotel-chaos/shared   # if shared changed since last build
+npm run dev
+# Web: http://localhost:5173/chaos
+# API: http://localhost:3001
+
+API=http://localhost:3001
+
+EXP=$(curl -s -X POST "$API/experiments" -H "Content-Type: application/json" -d '{}' | jq -r .id)
+echo "$EXP"
+
+curl -si -X POST "$API/experiments/$EXP/start"
+
+# poll until COMPLETED or FAILED (often 1–3 minutes)
+curl -s "$API/experiments/$EXP" | jq '{id, status}'
+curl -s "$API/experiments/$EXP/metrics" | jq .
+curl -s "$API/experiments/$EXP/timeline" | jq '.events[] | {timestamp, kind, label}'
+```
+
+**Pass criteria:** After `COMPLETED`, metrics show `totalRequests: 2`, `successfulRequests: 1`, `failedRequests: 1`, `failureRatePercent: 50`, `result: "RECOVERED"`, and non-null `databaseDowntimeSeconds` / `recoveryTimeSeconds` (wall-clock varies per run). Mid-run: `result: "IN_PROGRESS"` and `null` durations until both endpoints exist. `/chaos` **Recovery metrics** matches `curl`. `GET /experiments/:id` still returns `status: "COMPLETED"`, not `RECOVERED`. Optional: `npx tsx apps/api/src/experiments/metrics.smoke.ts`. See [Milestone 8 — recovery metrics](#milestone-8--recovery-metrics).
+
 ---
 ### Find IDs for Milestone 4 / 5
 
@@ -426,7 +574,7 @@ Dashboard: Project → Settings; each service → Settings.
 
 ## IDs and URLs
 
-Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Milestone 6 experiment orchestrator (primary DB stop/restart).
+Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Milestone 6–8 experiment orchestrator / timeline / metrics (primary DB stop/restart). Milestones 7–8 add no new Railway IDs.
 
 | Item                        | Value                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------- |
@@ -466,6 +614,10 @@ Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Miles
 | `database: "down"` on `/health` but API is up | DB unreachable or bad credentials; bookings may 500/503 depending on error type. |
 | `/infrastructure` primary-db `STOPPED` but `rawDeploymentStatus: SUCCESS` | Expected. Railway does not rewrite latest deployment to `REMOVED` on stop. `status` is the SQL probe; `rawDeploymentStatus` is the deploy record. `/health` `database` should match (`down` when `STOPPED`). |
 | Booking `500` / no `BOOKING_FAILED` in `audit_events` while audit is down | Audit writes are swallowed (`audit write failed` in API logs). Failure events are stored in audit, so they vanish if audit is down. Primary-up + audit-down should still 201 if insert succeeds. Primary-down bookings should be 503 `DATABASE_UNAVAILABLE` (`isDatabaseUnavailable` includes `node-pg` “connection terminated” messages with no `code`). See [IMPLEMENTATION_MILESTONE_5.md](../IMPLEMENTATION_MILESTONE_5.md) Known behavior. |
+| `/timeline` 404 after API restart | In-memory envelope is gone and no `audit_events` for that `experimentId`. Expected. |
+| `/timeline` missing “Experiment started” after API restart | Expected. Envelope steps are not persisted; remaining rows are audit-only. See [Milestone 7 — experiment timeline](#milestone-7--experiment-timeline). |
+| `/metrics` 200 but `recoveryTimeSeconds: null` after API restart | Expected partial metrics. Restart-initiated timestamp was envelope-only; counts may still be 2/1/1 with `result: UNKNOWN`. See [Milestone 8 — recovery metrics](#milestone-8--recovery-metrics). |
+| `status: COMPLETED` but metrics `result: RECOVERED` | Expected. Different fields — M6 status vs M8 display enum. |
 
 ### Optional — static web on Railway (Milestone 1)
 

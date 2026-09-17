@@ -51,3 +51,9 @@ export {
   type TimelineEventKind,
   type TimelineEventSource,
 } from "./timeline.js";
+export {
+  experimentMetricsResponseSchema,
+  experimentMetricsResultSchema,
+  type ExperimentMetricsResponse,
+  type ExperimentMetricsResult,
+} from "./metrics.js";

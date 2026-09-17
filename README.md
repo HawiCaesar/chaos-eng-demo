@@ -156,9 +156,54 @@ curl -s "$API/experiments/$EXP" | jq '{id, status, error, failureRequestId, reco
 curl -s "$API/experiments/$EXP/events" | jq '.events[] | {eventType, experimentId, requestId, bookingId}'
 ```
 
+## Milestone 7 — experiment timeline
+
+Chronological narrative on **`/chaos`** below the M6 run panel. The API composes `GET /experiments/:id/timeline` from in-memory `statusHistory` plus curated audit rows. The UI renders the array; it does **not** merge sources in the browser. Raw audit remains on `GET /experiments/:id/events`.
+
+Implementation: [`IMPLEMENTATION_MILESTONE_7.md`](IMPLEMENTATION_MILESTONE_7.md). Railway notes: [`docs/railway.md`](docs/railway.md#milestone-7--experiment-timeline).
+
+**Envelope steps** (`Experiment started`, `Database stopping`, …) live only in the API process and disappear on restart. **Audit steps** (`BOOKING_ATTEMPTED`, `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED` → **Booking succeeded**) are durable. Timeline omits `REQUEST_RECEIVED` and `VALIDATION_PASSED`. After an API restart, `/timeline` for an old `EXP-` is audit-only if those rows exist, or **404** if not.
+
+### Local timeline smoke (curl)
+
+Same M6 run as above; after start (or when `COMPLETED`):
+
+```bash
+curl -s "$API/experiments/$EXP/timeline" | jq '.events[] | {timestamp, kind, label, source}'
+curl -s "$API/experiments/$EXP/events" | jq '.events[] | {eventType}'
+```
+
+Expect the same 1–3 minute Railway window as M6 before the list is complete.
+
+## Milestone 8 — recovery metrics
+
+Summary counts and durations on **`/chaos`** below the M7 timeline. The API composes **`GET /experiments/:id/metrics`** from the same timeline sources as M7; the UI renders the JSON and does **not** compute rates or durations from the timeline array.
+
+Implementation: [`IMPLEMENTATION_MILESTONE_8.md`](IMPLEMENTATION_MILESTONE_8.md). Railway notes: [`docs/railway.md`](docs/railway.md#milestone-8--recovery-metrics).
+
+**Experiment `status`** on `GET /experiments/:id` stays M6 (`COMPLETED`, `FAILED`, …). Metrics **`result`** is a display enum (`RECOVERED`, `FAILED`, `IN_PROGRESS`, `UNKNOWN`) for the summary card only — e.g. `COMPLETED` → `RECOVERED` in metrics, not on the run panel.
+
+After an API restart, `/metrics` can return **200 partial** (counts from audit; `recoveryTimeSeconds` often `null`; `result: UNKNOWN`) when audit rows exist, while `GET /experiments/:id` still **404s** (M6). Live durations are wall-clock seconds from timeline timestamps (not fixed plan.md demo numbers).
+
+### Local metrics smoke (curl)
+
+Same M6 run as above; poll metrics while in flight or after `COMPLETED`:
+
+```bash
+curl -s "$API/experiments/$EXP/metrics" | jq .
+
+curl -s "$API/experiments/$EXP/timeline" | jq '.events[] | {timestamp, kind, label, source}'
+```
+
+Optional pure composer check (no Railway/Postgres):
+
+```bash
+npx tsx apps/api/src/experiments/metrics.smoke.ts
+```
+
 ## Railway
 
-M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**. **M6:** automated database-outage experiments via `/experiments*` (in-memory state; audit + bookings as evidence).
+M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**. **M6:** automated database-outage experiments via `/experiments*` (in-memory state; audit + bookings as evidence). **M7:** `GET /experiments/:id/timeline` on `/chaos` (envelope + curated audit; no new Railway IDs). **M8:** `GET /experiments/:id/metrics` + recovery metrics panel (no new Railway IDs).
 
 **Full checklist, tokens, troubleshooting:** [`docs/railway.md`](docs/railway.md)
 
@@ -253,3 +298,28 @@ See [`plan.md`](plan.md) and [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for milest
 | API | `POST /experiments` → 201 `CREATED`; `POST .../start` → 202; poll `GET /experiments/:id` (see curl above) |
 | Audit trail | `GET /experiments/:id/events` includes `DATABASE_UNAVAILABLE`, `BOOKING_FAILED`, `DATABASE_RECOVERED`, `BOOKING_CREATED` with same `experimentId` |
 | Docs | [`IMPLEMENTATION_MILESTONE_6.md`](IMPLEMENTATION_MILESTONE_6.md); [`docs/railway.md`](docs/railway.md#milestone-6--database-outage-experiment) |
+
+## Milestone 7 verification
+
+| Check | How |
+|-------|-----|
+| Types | `npm run typecheck` |
+| UI | http://localhost:5173/chaos — timeline panel updates while the experiment is in flight |
+| API | `GET /experiments/:id/timeline` includes labels equivalent to plan.md (started, stopping, stopped, booking attempted, `DATABASE_UNAVAILABLE`, booking failed, restart initiated, recovered, booking succeeded, completed) |
+| Curated | Timeline omits `REQUEST_RECEIVED` and `VALIDATION_PASSED`; those stay on `GET /experiments/:id/events` |
+| Recovery | At most one “Database recovered” line when audit `DATABASE_RECOVERED` exists |
+| Restart | After API process restart, `/timeline` for an old `EXP-` is audit-only if audit rows exist, or 404 if not |
+| Docs | [`IMPLEMENTATION_MILESTONE_7.md`](IMPLEMENTATION_MILESTONE_7.md); [`docs/railway.md`](docs/railway.md#milestone-7--experiment-timeline) |
+
+## Milestone 8 verification
+
+| Check | How |
+|-------|-----|
+| Types | `npm run typecheck` |
+| Smoke | `npx tsx apps/api/src/experiments/metrics.smoke.ts` → all assertions passed |
+| UI | http://localhost:5173/chaos — **Recovery metrics** below timeline; values match API while polling |
+| API | After `COMPLETED`: `GET /experiments/:id/metrics` → 2 / 1 / 1, 50%, `result: RECOVERED`, non-null downtime/recovery seconds (live timing varies) |
+| Mid-run | `result: IN_PROGRESS`; `null` durations until both endpoints exist on the timeline |
+| vs status | `GET /experiments/:id` → `status: COMPLETED`; metrics → `result: RECOVERED` |
+| Restart | After API restart, `/metrics` 200 partial if audit exists; `GET /experiments/:id` 404 |
+| Docs | [`IMPLEMENTATION_MILESTONE_8.md`](IMPLEMENTATION_MILESTONE_8.md); [`docs/railway.md`](docs/railway.md#milestone-8--recovery-metrics) |

@@ -1,5 +1,7 @@
 import type {
   Experiment,
+  ExperimentMetricsResult,
+  ExperimentScenario,
   ExperimentStatus,
   InfrastructureServiceStatus,
   ServiceLifecycleStatus,
@@ -11,6 +13,7 @@ import {
   createExperiment,
   getCurrentExperiment,
   getExperiment,
+  getExperimentMetrics,
   getExperimentTimeline,
   getInfrastructure,
   restartPrimaryDb,
@@ -94,12 +97,42 @@ const experimentStatusToneClass = (
   return { dot: "bg-amber-500", text: "text-amber-900" };
 };
 
+const metricsResultToneClass = (
+  result: ExperimentMetricsResult,
+): { dot: string; text: string } => {
+  switch (result) {
+    case "RECOVERED":
+      return { dot: "bg-emerald-500", text: "text-emerald-800" };
+    case "FAILED":
+      return { dot: "bg-red-500", text: "text-red-800" };
+    case "IN_PROGRESS":
+      return { dot: "bg-amber-500", text: "text-amber-900" };
+    case "UNKNOWN":
+      return { dot: "bg-slate-400", text: "text-slate-700" };
+  }
+};
+
+const formatScenarioLabel = (scenario: ExperimentScenario): string => {
+  if (scenario === "database-outage") {
+    return "Database outage";
+  }
+  return scenario;
+};
+
+const formatNullablePercent = (value: number | null): string =>
+  value === null ? "—" : `${value}%`;
+
+const formatNullableSeconds = (value: number | null): string =>
+  value === null ? "—" : `${value}s`;
+
 export const ChaosControlPage = () => {
   const headingId = useId();
   const experimentSectionId = useId();
   const experimentStatusId = useId();
   const timelineSectionId = useId();
   const timelineListId = useId();
+  const metricsSectionId = useId();
+  const metricsResultId = useId();
   const queryClient = useQueryClient();
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
@@ -163,6 +196,25 @@ export const ChaosControlPage = () => {
     },
   });
 
+  const {
+    data: metrics,
+    isPending: isMetricsPending,
+    isError: isMetricsError,
+    error: metricsError,
+    refetch: refetchMetrics,
+  } = useQuery({
+    queryKey: ["experiment", trackedExperimentId, "metrics"],
+    queryFn: () => getExperimentMetrics(trackedExperimentId!),
+    enabled: trackedExperimentId !== null,
+    refetchInterval: () => {
+      const cached = queryClient.getQueryData<Experiment>([
+        "experiment",
+        trackedExperimentId,
+      ]);
+      return experimentPollIntervalMs(cached?.status ?? experiment?.status);
+    },
+  });
+
   const primary = data?.services.find((service) => service.key === "primary-db");
 
   const primaryStatus = primary?.status;
@@ -191,6 +243,10 @@ export const ChaosControlPage = () => {
     void refetchTimeline();
   };
 
+  const handleRetryMetrics = () => {
+    void refetchMetrics();
+  };
+
   const handleRunExperiment = async () => {
     const confirmed = window.confirm(
       "This run stops primary Postgres, submits one booking that should fail with DATABASE_UNAVAILABLE, restarts the database, then submits one booking that should succeed. Continue?",
@@ -211,6 +267,9 @@ export const ChaosControlPage = () => {
       void queryClient.invalidateQueries({ queryKey: ["experiment", started.id] });
       void queryClient.invalidateQueries({
         queryKey: ["experiment", started.id, "timeline"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["experiment", started.id, "metrics"],
       });
     } catch (caught) {
       setExperimentRunError(
@@ -303,7 +362,16 @@ export const ChaosControlPage = () => {
         : "Could not load experiment timeline"
     : null;
 
+  const metricsErrorMessage = isMetricsError
+    ? metricsError instanceof ApiError
+      ? metricsError.body.message
+      : metricsError instanceof Error
+        ? metricsError.message
+        : "Could not load recovery metrics"
+    : null;
+
   const showTimelineSection = trackedExperimentId !== null;
+  const metricsTone = metrics ? metricsResultToneClass(metrics.result) : null;
   const timelineEvents = timeline?.events ?? [];
   const showNoTimelineYet =
     !isTimelinePending &&
@@ -455,6 +523,100 @@ export const ChaosControlPage = () => {
                 </li>
               ))}
             </ol>
+          )}
+        </section>
+      )}
+
+      {showTimelineSection && (
+        <section
+          className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+          aria-labelledby={metricsSectionId}
+        >
+          <h2 id={metricsSectionId} className="text-sm font-medium text-slate-900">
+            Recovery metrics
+          </h2>
+          <p className="mt-1 font-mono text-xs text-slate-500">{trackedExperimentId}</p>
+
+          {isMetricsError && (
+            <div
+              className="mt-4 rounded-lg border border-red-300 bg-red-50 p-3 text-red-950"
+              role="alert"
+            >
+              <p className="text-sm font-medium">Could not load recovery metrics</p>
+              <p className="mt-1 text-sm">{metricsErrorMessage}</p>
+              <button
+                type="button"
+                className="mt-3 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                onClick={handleRetryMetrics}
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {isMetricsPending && !isMetricsError && (
+            <p className="mt-4 text-sm text-slate-500" aria-busy="true">
+              Loading recovery metrics…
+            </p>
+          )}
+
+          {!isMetricsPending && !isMetricsError && metrics && metricsTone && (
+            <dl
+              className="mt-4 space-y-3 text-sm"
+              aria-live="polite"
+              aria-labelledby={metricsSectionId}
+            >
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Scenario</dt>
+                <dd className="font-medium text-slate-900">
+                  {formatScenarioLabel(metrics.scenario)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Requests</dt>
+                <dd className="tabular-nums text-slate-900">{metrics.totalRequests}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Successful</dt>
+                <dd className="tabular-nums text-slate-900">{metrics.successfulRequests}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Failed</dt>
+                <dd className="tabular-nums text-slate-900">{metrics.failedRequests}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Failure rate</dt>
+                <dd className="tabular-nums text-slate-900">
+                  {formatNullablePercent(metrics.failureRatePercent)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Database downtime</dt>
+                <dd className="tabular-nums text-slate-900">
+                  {formatNullableSeconds(metrics.databaseDowntimeSeconds)}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-slate-600">Recovery time</dt>
+                <dd className="tabular-nums text-slate-900">
+                  {formatNullableSeconds(metrics.recoveryTimeSeconds)}
+                </dd>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-t border-slate-100 pt-3">
+                <dt className="text-slate-600">Result</dt>
+                <dd
+                  id={metricsResultId}
+                  className="flex items-center gap-2"
+                  aria-live="polite"
+                >
+                  <span
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${metricsTone.dot}`}
+                    aria-hidden="true"
+                  />
+                  <span className={`font-semibold ${metricsTone.text}`}>{metrics.result}</span>
+                </dd>
+              </div>
+            </dl>
           )}
         </section>
       )}
