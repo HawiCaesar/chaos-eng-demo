@@ -7,11 +7,13 @@ import type {
   ServiceLifecycleStatus,
 } from "@hotel-chaos/shared";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   ApiError,
   createExperiment,
   getCurrentExperiment,
+  getErrorMessage,
   getExperiment,
   getExperimentMetrics,
   getExperimentTimeline,
@@ -22,6 +24,8 @@ import {
 } from "../lib/api";
 
 type PendingAction = "stop" | "restart" | null;
+
+type PendingConfirmation = "run-experiment" | "stop" | null;
 
 const TERMINAL_EXPERIMENT_STATUSES: ExperimentStatus[] = ["COMPLETED", "FAILED"];
 
@@ -127,6 +131,8 @@ const formatNullableSeconds = (value: number | null): string =>
 
 export const ChaosControlPage = () => {
   const headingId = useId();
+  const accessSectionId = useId();
+  const accessTokenId = useId();
   const experimentSectionId = useId();
   const experimentStatusId = useId();
   const timelineSectionId = useId();
@@ -134,12 +140,15 @@ export const ChaosControlPage = () => {
   const metricsSectionId = useId();
   const metricsResultId = useId();
   const queryClient = useQueryClient();
+  const [demoAccessToken, setDemoAccessToken] = useState("");
+  const [demoAccessTokenInput, setDemoAccessTokenInput] = useState("");
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [actionInFlight, setActionInFlight] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [experimentRunInFlight, setExperimentRunInFlight] = useState(false);
   const [experimentRunError, setExperimentRunError] = useState<string | null>(null);
   const [trackedExperimentId, setTrackedExperimentId] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation>(null);
 
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ["infrastructure"],
@@ -247,20 +256,41 @@ export const ChaosControlPage = () => {
     void refetchMetrics();
   };
 
-  const handleRunExperiment = async () => {
-    const confirmed = window.confirm(
-      "This run stops primary Postgres, submits one booking that should fail with DATABASE_UNAVAILABLE, restarts the database, then submits one booking that should succeed. Continue?",
-    );
-    if (!confirmed) {
+  const handleUnlockControls = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const token = demoAccessTokenInput.trim();
+    if (!token) {
       return;
     }
 
+    setDemoAccessToken(token);
+    setDemoAccessTokenInput("");
+    setActionError(null);
+    setExperimentRunError(null);
+  };
+
+  const handleLockControls = () => {
+    setDemoAccessToken("");
+    setDemoAccessTokenInput("");
+  };
+
+  const handleAuthorizationError = (caught: unknown): boolean => {
+    if (!(caught instanceof ApiError) || caught.status !== 401) {
+      return false;
+    }
+
+    handleLockControls();
+    return true;
+  };
+
+  const handleRunExperiment = async () => {
+    setPendingConfirmation(null);
     setExperimentRunInFlight(true);
     setExperimentRunError(null);
 
     try {
-      const created = await createExperiment({});
-      const started = await startExperiment(created.id);
+      const created = await createExperiment(demoAccessToken, {});
+      const started = await startExperiment(created.id, demoAccessToken);
       setTrackedExperimentId(started.id);
       queryClient.setQueryData(["experiment", started.id], started);
       void queryClient.invalidateQueries({ queryKey: ["experiment", "current"] });
@@ -272,41 +302,25 @@ export const ChaosControlPage = () => {
         queryKey: ["experiment", started.id, "metrics"],
       });
     } catch (caught) {
-      setExperimentRunError(
-        caught instanceof ApiError
-          ? caught.body.message
-          : caught instanceof Error
-            ? caught.message
-            : "Experiment failed to start",
-      );
+      handleAuthorizationError(caught);
+      setExperimentRunError(getErrorMessage(caught, "Experiment failed to start"));
     } finally {
       setExperimentRunInFlight(false);
     }
   };
 
   const handleStop = async () => {
-    const confirmed = window.confirm(
-      "Stopping the primary database will make bookings fail until you restart it.",
-    );
-    if (!confirmed) {
-      return;
-    }
-
+    setPendingConfirmation(null);
     setActionInFlight(true);
     setActionError(null);
 
     try {
-      await stopPrimaryDb();
+      await stopPrimaryDb(demoAccessToken);
       setPendingAction("stop");
       void refetch();
     } catch (caught) {
-      setActionError(
-        caught instanceof ApiError
-          ? caught.body.message
-          : caught instanceof Error
-            ? caught.message
-            : "Stop failed",
-      );
+      handleAuthorizationError(caught);
+      setActionError(getErrorMessage(caught, "Stop failed"));
     } finally {
       setActionInFlight(false);
     }
@@ -317,17 +331,12 @@ export const ChaosControlPage = () => {
     setActionError(null);
 
     try {
-      await restartPrimaryDb();
+      await restartPrimaryDb(demoAccessToken);
       setPendingAction("restart");
       void refetch();
     } catch (caught) {
-      setActionError(
-        caught instanceof ApiError
-          ? caught.body.message
-          : caught instanceof Error
-            ? caught.message
-            : "Restart failed",
-      );
+      handleAuthorizationError(caught);
+      setActionError(getErrorMessage(caught, "Restart failed"));
     } finally {
       setActionInFlight(false);
     }
@@ -336,15 +345,12 @@ export const ChaosControlPage = () => {
   const isRailwayUnavailable =
     isError && error instanceof ApiError && error.body.code === "RAILWAY_UNAVAILABLE";
   const errorMessage = isError
-    ? error instanceof ApiError
-      ? error.body.message
-      : error instanceof Error
-        ? error.message
-        : "Could not load infrastructure status"
+    ? getErrorMessage(error, "Could not load infrastructure status")
     : null;
 
   const experimentInFlight = isExperimentInFlightStatus(experiment?.status);
   const actionsLocked =
+    demoAccessToken.length === 0 ||
     pendingAction !== null ||
     actionInFlight ||
     experimentInFlight ||
@@ -355,19 +361,11 @@ export const ChaosControlPage = () => {
     : null;
 
   const timelineErrorMessage = isTimelineError
-    ? timelineError instanceof ApiError
-      ? timelineError.body.message
-      : timelineError instanceof Error
-        ? timelineError.message
-        : "Could not load experiment timeline"
+    ? getErrorMessage(timelineError, "Could not load experiment timeline")
     : null;
 
   const metricsErrorMessage = isMetricsError
-    ? metricsError instanceof ApiError
-      ? metricsError.body.message
-      : metricsError instanceof Error
-        ? metricsError.message
-        : "Could not load recovery metrics"
+    ? getErrorMessage(metricsError, "Could not load recovery metrics")
     : null;
 
   const showTimelineSection = trackedExperimentId !== null;
@@ -390,6 +388,59 @@ export const ChaosControlPage = () => {
 
       <section
         className="mt-8 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+        aria-labelledby={accessSectionId}
+      >
+        <h2 id={accessSectionId} className="text-sm font-medium text-slate-900">
+          Demo operator access
+        </h2>
+        {demoAccessToken ? (
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <p className="text-sm font-medium text-emerald-800" role="status">
+              Destructive controls unlocked
+            </p>
+            <button
+              type="button"
+              onClick={handleLockControls}
+              className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+            >
+              Lock controls
+            </button>
+          </div>
+        ) : (
+          <form className="mt-3 space-y-3" onSubmit={handleUnlockControls}>
+            <div>
+              <label
+                htmlFor={accessTokenId}
+                className="block text-sm font-medium text-slate-700"
+              >
+                Demo access token
+              </label>
+              <input
+                id={accessTokenId}
+                type="password"
+                autoComplete="off"
+                required
+                value={demoAccessTokenInput}
+                onChange={(event) => setDemoAccessTokenInput(event.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-300"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={demoAccessTokenInput.trim().length === 0}
+              className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Unlock controls
+            </button>
+            <p className="text-xs text-slate-500">
+              The token stays in memory and is cleared when this page reloads.
+            </p>
+          </form>
+        )}
+      </section>
+
+      <section
+        className="mt-6 rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
         aria-labelledby={experimentSectionId}
       >
         <h2 id={experimentSectionId} className="text-sm font-medium text-slate-500">
@@ -446,8 +497,8 @@ export const ChaosControlPage = () => {
         <button
           type="button"
           aria-label="Run database outage experiment"
-          disabled={experimentInFlight || experimentRunInFlight}
-          onClick={() => void handleRunExperiment()}
+          disabled={actionsLocked}
+          onClick={() => setPendingConfirmation("run-experiment")}
           className="mt-4 rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           Run database outage experiment
@@ -685,7 +736,7 @@ export const ChaosControlPage = () => {
                         type="button"
                         aria-label="Stop primary database"
                         disabled={actionsLocked || displayed !== "RUNNING"}
-                        onClick={() => void handleStop()}
+                        onClick={() => setPendingConfirmation("stop")}
                         className="rounded-md bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         Stop Database
@@ -709,6 +760,25 @@ export const ChaosControlPage = () => {
           })}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={pendingConfirmation === "run-experiment"}
+        title="Run chaos experiment?"
+        description="This run stops primary Postgres, submits one booking that should fail with DATABASE_UNAVAILABLE, restarts the database, then submits one booking that should succeed."
+        confirmLabel="Run experiment"
+        destructive
+        onConfirm={() => void handleRunExperiment()}
+        onCancel={() => setPendingConfirmation(null)}
+      />
+      <ConfirmDialog
+        open={pendingConfirmation === "stop"}
+        title="Stop primary database?"
+        description="Stopping the primary database will make bookings fail until you restart it."
+        confirmLabel="Stop database"
+        destructive
+        onConfirm={() => void handleStop()}
+        onCancel={() => setPendingConfirmation(null)}
+      />
     </main>
   );
 };

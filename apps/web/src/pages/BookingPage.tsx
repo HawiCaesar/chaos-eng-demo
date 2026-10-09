@@ -109,7 +109,6 @@ export const BookingPage = () => {
     <main className="mx-auto flex min-h-screen max-w-lg flex-col px-6 py-12">
       <header>
         <h1 className="text-3xl font-semibold tracking-tight text-slate-900">Book a room</h1>
-        <p className="mt-2 text-slate-600">Normal path (Milestone 2)</p>
       </header>
 
       {infrastructureError && (

@@ -10,6 +10,7 @@ import { getPool } from "../db/pool.js";
 import { probeDatabase, type DatabaseProbeResult } from "../db/probe.js";
 import { env } from "../env.js";
 import { stopPrimaryDatabase, restartPrimaryDatabase } from "../infrastructure/primaryDbLifecycle.js";
+import { requireDemoAccess } from "../middleware/demoAccess.js";
 import { railwayClient } from "../railway.js";
 
 const STARTING_DEPLOYMENT_STATUSES = new Set([
@@ -128,7 +129,7 @@ infrastructureRouter.get("/infrastructure", async (_req, res, next) => {
   }
 });
 
-infrastructureRouter.post("/infrastructure/primary-db/stop", async (_req, res, next) => {
+infrastructureRouter.post("/infrastructure/primary-db/stop", requireDemoAccess, async (_req, res, next) => {
   try {
     await stopPrimaryDatabase();
     res.status(202).json({ key: "primary-db", action: "stop" });
@@ -137,7 +138,7 @@ infrastructureRouter.post("/infrastructure/primary-db/stop", async (_req, res, n
   }
 });
 
-infrastructureRouter.post("/infrastructure/primary-db/restart", async (_req, res, next) => {
+infrastructureRouter.post("/infrastructure/primary-db/restart", requireDemoAccess, async (_req, res, next) => {
   try {
     await restartPrimaryDatabase();
     res.status(202).json({ key: "primary-db", action: "restart" });

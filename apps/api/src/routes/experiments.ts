@@ -16,10 +16,11 @@ import {
   hasCreatedOrInFlight,
 } from "../experiments/store.js";
 import { zodValidationDetails } from "../errors.js";
+import { requireDemoAccess } from "../middleware/demoAccess.js";
 
 export const experimentsRouter = Router();
 
-experimentsRouter.post("/experiments", (req, res) => {
+experimentsRouter.post("/experiments", requireDemoAccess, (req, res) => {
   const parsed = createExperimentBodySchema.safeParse(req.body ?? {});
 
   if (!parsed.success) {
@@ -53,9 +54,9 @@ experimentsRouter.get("/experiments/current", (_req, res) => {
   res.status(200).json(experimentSchema.parse(experiment));
 });
 
-experimentsRouter.post("/experiments/:id/start", (req, res, next) => {
+experimentsRouter.post("/experiments/:id/start", requireDemoAccess, (req, res, next) => {
   try {
-    const experiment = startExperiment(req.params.id);
+    const experiment = startExperiment(String(req.params.id));
     res.status(202).json(experimentSchema.parse(experiment));
   } catch (error) {
     if (!(error instanceof Error)) {

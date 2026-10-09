@@ -1,7 +1,7 @@
 import type { Booking } from "@hotel-chaos/shared";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
-import { ApiError, getBooking } from "../lib/api";
+import { ApiError, getBooking, getErrorMessage } from "../lib/api";
 
 export const BookingDetailsPage = () => {
   const { bookingId } = useParams<{ bookingId: string }>();
@@ -33,13 +33,7 @@ export const BookingDetailsPage = () => {
 
   const isNotFound = isError && error instanceof ApiError && error.status === 404;
   const errorMessage =
-    isError && !isNotFound
-      ? error instanceof ApiError
-        ? error.body.message
-        : error instanceof Error
-          ? error.message
-          : "Could not load booking"
-      : null;
+    isError && !isNotFound ? getErrorMessage(error, "Could not load booking") : null;
 
   return (
     <main className="mx-auto min-h-screen max-w-lg px-6 py-12">

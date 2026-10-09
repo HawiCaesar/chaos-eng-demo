@@ -118,7 +118,7 @@ See [`IMPLEMENTATION_MILESTONE_3.md`](IMPLEMENTATION_MILESTONE_3.md) and [`docs/
 
 Infrastructure screen at **`/chaos`**. The Booking API owns Railway (`GET /infrastructure`, `POST .../primary-db/stop|restart`). Local web must use `VITE_API_URL=http://localhost:3001` in `apps/web/.env`.
 
-The API **requires** at boot: `RAILWAY_API_TOKEN`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_PRIMARY_DB_SERVICE_ID`, `RAILWAY_AUDIT_DB_SERVICE_ID`, `RAILWAY_API_SERVICE_ID` — IDs in [`docs/railway.md`](docs/railway.md#ids-and-urls). Set them in `apps/api/.env` **and** on the deployed **booking-api** service before shipping this milestone, or production will not start. `build:api` builds `shared` → `railway-client` → `api`. Mutations are unauthenticated; Stop breaks bookings until Restart.
+The API **requires** at boot: `DEMO_ACCESS_TOKEN`, `RAILWAY_API_TOKEN`, `RAILWAY_ENVIRONMENT_ID`, `RAILWAY_PRIMARY_DB_SERVICE_ID`, `RAILWAY_AUDIT_DB_SERVICE_ID`, `RAILWAY_API_SERVICE_ID` — IDs in [`docs/railway.md`](docs/railway.md#ids-and-urls). Set them in `apps/api/.env` **and** on the deployed **booking-api** service before shipping this milestone, or production will not start. `build:api` builds `shared` → `railway-client` → `api`. Destructive mutations require the demo Bearer token; Stop breaks bookings until Restart.
 
 `STOPPING` / `STARTING` are UI overlays while a stop/restart is in flight. Database card `status` is a SQL probe (`SELECT 1`); Railway `rawDeploymentStatus` can stay `SUCCESS` after stop. Details: [`IMPLEMENTATION_MILESTONE_5.md`](IMPLEMENTATION_MILESTONE_5.md).
 
@@ -128,7 +128,7 @@ Automated chaos scenario from **`/chaos`**: **Run database outage experiment** (
 
 Implementation: [`IMPLEMENTATION_MILESTONE_6.md`](IMPLEMENTATION_MILESTONE_6.md). Railway notes: [`docs/railway.md`](docs/railway.md#milestone-6--database-outage-experiment).
 
-**Experiment run state** lives in an **in-memory Map** in the API (lost on restart). **Audit events** with `experimentId` and the verification **booking** on primary Postgres are the durable trail. Experiment endpoints are **unauthenticated** (same as M5 infra mutations).
+**Experiment run state** lives in an **in-memory Map** in the API (lost on restart). **Audit events** with `experimentId` and the verification **booking** on primary Postgres are the durable trail. Experiment create/start mutations require the demo Bearer token; experiment status, timeline, metrics, and events remain public reads.
 
 Run audit migration once if you have not since M6:
 
@@ -203,24 +203,29 @@ npx tsx apps/api/src/experiments/metrics.smoke.ts
 
 ## Railway
 
-M1: **booking-api** on Railway + **Postgres** in the same project. **M2:** primary Postgres + bookings. **M3:** second Postgres for audit + `AUDIT_DATABASE_URL` on **booking-api**. **M6:** automated database-outage experiments via `/experiments*` (in-memory state; audit + bookings as evidence). **M7:** `GET /experiments/:id/timeline` on `/chaos` (envelope + curated audit; no new Railway IDs). **M8:** `GET /experiments/:id/metrics` + recovery metrics panel (no new Railway IDs).
+Production runs **booking-web**, **booking-api**, primary Postgres, and audit Postgres in one Railway project. Automated database-outage experiments use `/experiments*` (in-memory state; audit + bookings as evidence). Railway IaC lives in [`.railway/railway.ts`](.railway/railway.ts).
 
 **Full checklist, tokens, troubleshooting:** [`docs/railway.md`](docs/railway.md)
 
 ```bash
 # CLI (global or npx)
 npx @railway/cli login
-npx @railway/cli link    # choose booking-api, not Postgres
-npx @railway/cli up
+npx @railway/cli link
+npx @railway/cli config plan
+npx @railway/cli up --service booking-api
+npx @railway/cli up --service booking-web
 ```
 
-On **booking-api**, set `NIXPACKS_NODE_VERSION=20` (or `22`) and `WEB_ORIGIN=http://localhost:5173`.
+On **booking-api**, set `WEB_ORIGIN=https://booking-web-production-2789.up.railway.app`.
+On **booking-web**, set `VITE_API_URL=https://booking-api-production-25be.up.railway.app`.
 
 Verify deployed API:
 
 ```bash
 curl -s "https://booking-api-production-25be.up.railway.app/health"
 ```
+
+Web: [https://booking-web-production-2789.up.railway.app](https://booking-web-production-2789.up.railway.app)
 
 ## Repo layout
 
@@ -229,11 +234,11 @@ apps/web/                 Vite + React + React Router v7
 apps/api/                 Express 5 API
 packages/shared/          Shared Zod schemas, env, booking types
 packages/railway-client/  Railway GraphQL client — see IMPLEMENTATION_MILESTONE_4.md; smoke: npm run railway:smoke
-railway.json              API deploy config (root)
+.railway/railway.ts       Railway Infrastructure as Code
 docs/railway.md           Project/service IDs and Railway steps
 ```
 
-See [`plan.md`](plan.md) and [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for milestone scope.
+See [`plan.md`](plan.md) and the milestone implementation documents for scope.
 
 ## Milestone 1 verification
 

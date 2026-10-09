@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "start": "sirv dist --single --host 0.0.0.0 --port ${PORT:-3000}",
     "lint": "oxlint",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit"
@@ -15,7 +16,8 @@
     "@tanstack/react-query": "^5.101.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router": "^7.18.2"
+    "react-router": "^7.18.2",
+    "sirv-cli": "^3.0.1"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

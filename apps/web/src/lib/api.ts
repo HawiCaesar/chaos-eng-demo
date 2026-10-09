@@ -24,6 +24,16 @@ export class ApiError extends Error {
   }
 }
 
+export const getErrorMessage = (caught: unknown, fallback: string): string => {
+  if (caught instanceof ApiError) {
+    return caught.body.message;
+  }
+  if (caught instanceof Error) {
+    return caught.message;
+  }
+  return fallback;
+};
+
 export type HealthResponse = {
   status: string;
   service: string;
@@ -77,6 +87,10 @@ const requestJson = async <T>(path: string, init?: RequestInit): Promise<T> => {
   return (await response.json()) as T;
 };
 
+const demoAccessHeaders = (demoAccessToken: string): HeadersInit => ({
+  Authorization: `Bearer ${demoAccessToken}`,
+});
+
 export const getHealth = async (): Promise<HealthResponse> =>
   requestJson<HealthResponse>("/health");
 
@@ -94,27 +108,39 @@ export const getBooking = async (bookingId: string): Promise<Booking> =>
 export const getInfrastructure = async (): Promise<InfrastructureStatusResponse> =>
   requestJson<InfrastructureStatusResponse>("/infrastructure");
 
-export const stopPrimaryDb = async (): Promise<PrimaryDbStopResponse> =>
+export const stopPrimaryDb = async (
+  demoAccessToken: string,
+): Promise<PrimaryDbStopResponse> =>
   requestJson<PrimaryDbStopResponse>("/infrastructure/primary-db/stop", {
     method: "POST",
+    headers: demoAccessHeaders(demoAccessToken),
   });
 
-export const restartPrimaryDb = async (): Promise<PrimaryDbRestartResponse> =>
+export const restartPrimaryDb = async (
+  demoAccessToken: string,
+): Promise<PrimaryDbRestartResponse> =>
   requestJson<PrimaryDbRestartResponse>("/infrastructure/primary-db/restart", {
     method: "POST",
+    headers: demoAccessHeaders(demoAccessToken),
   });
 
 export const createExperiment = async (
+  demoAccessToken: string,
   body: CreateExperimentBody = {},
 ): Promise<Experiment> =>
   requestJson<Experiment>("/experiments", {
     method: "POST",
+    headers: demoAccessHeaders(demoAccessToken),
     body: JSON.stringify(body),
   });
 
-export const startExperiment = async (id: string): Promise<Experiment> =>
+export const startExperiment = async (
+  id: string,
+  demoAccessToken: string,
+): Promise<Experiment> =>
   requestJson<Experiment>(`/experiments/${encodeURIComponent(id)}/start`, {
     method: "POST",
+    headers: demoAccessHeaders(demoAccessToken),
   });
 
 export const getExperiment = async (id: string): Promise<Experiment> =>

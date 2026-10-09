@@ -1,14 +1,67 @@
-# Railway — Milestone 1
+# Railway deployment
 
-This repo deploys the **API** (`apps/api`) via root `[railway.json](../railway.json)`. **Milestone 2+:** the API requires `DATABASE_URL` (Railway primary Postgres) at startup. **Milestone 3+:** also requires `AUDIT_DATABASE_URL` (second Postgres).
+The production interview environment contains **booking-web**, **booking-api**, a
+primary Postgres database, and a separate audit Postgres database. Railway
+Infrastructure as Code in [`.railway/railway.ts`](../.railway/railway.ts) owns
+service build, start, health-check, and replica settings. Service variables remain
+unmanaged so secrets are never written to source control.
 
 ## Repo setup (already done)
 
-- `[railway.json](../railway.json)` — Nixpacks runs `npm run build:api` (install is handled by Nixpacks; do **not** add `npm ci` to `buildCommand` — it can cause `EBUSY` on `node_modules/.cache`). Start: `node apps/api/dist/index.js`.
-- Root `[package.json](../package.json)` — `"engines": { "node": ">=20" }` and script `npm run build:api` (shared + api).
+- [`.railway/railway.ts`](../.railway/railway.ts) — current Railway IaC for all four services/resources.
+- Root `[package.json](../package.json)` — Node 20+, `build:api`, and `build:web`.
+- API build/start — `npm run build:api`; `node apps/api/dist/index.js`; health check `/health`.
+- Web build/start — `npm run build:web`; `npm run start -w web`; health check `/`.
 - `[.dockerignore](../.dockerignore)` — keeps local `node_modules` out of `railway up` uploads.
 
+## Interview handoff
 
+| Item | Value |
+| --- | --- |
+| Web | [https://booking-web-production-2789.up.railway.app](https://booking-web-production-2789.up.railway.app) |
+| API | [https://booking-api-production-25be.up.railway.app](https://booking-api-production-25be.up.railway.app) |
+| Chaos page | [https://booking-web-production-2789.up.railway.app/chaos](https://booking-web-production-2789.up.railway.app/chaos) |
+| Access token | `DEMO_ACCESS_TOKEN` on `booking-api`; copy privately from Railway Variables |
+| Expected run | Usually under 3 minutes; the verified production run completed in about 18 seconds |
+
+The browser keeps the demo token in React memory only. A reload locks the controls.
+The token is sent as `Authorization: Bearer …` only for stop, restart, experiment
+creation, and experiment start. Do not create a `VITE_DEMO_ACCESS_TOKEN` variable.
+
+If the API process dies while primary Postgres is stopped, recover from Railway by
+starting/redeploying the `Postgres` service. Confirm both databases are back:
+
+```bash
+curl -s https://booking-api-production-25be.up.railway.app/health | jq .
+```
+
+Rotate the demo token after sharing it:
+
+```bash
+openssl rand -hex 32 |
+  railway variable set DEMO_ACCESS_TOKEN --stdin --service booking-api
+```
+
+## Deploy or update
+
+```bash
+npm ci
+npm run build
+npm run typecheck
+npm run lint -w web
+npm audit --omit=dev
+
+railway config plan
+railway config apply --yes
+railway up --service booking-api --environment production
+railway up --service booking-web --environment production
+```
+
+`railway config plan` must show no resource deletions unless a deletion is
+intentional. Keep the last successful deployment available in Railway for rollback.
+The current interview release was uploaded with `railway up` so it includes the
+working tree. After these changes are committed and pushed, connect `booking-web`
+to `HawiCaesar/chaos-eng-demo` on `main` if deploy-on-push is desired.
 
 ## CLI check
 
@@ -35,13 +88,15 @@ Run from the **monorepo root** (`chaos-eng-demo/`).
 | 1   | `railway login` (or `npx @railway/cli login`)                                                     | ☑    |
 | 2   | `railway init` → project name `hotel-chaos-simulator`                                             | ☑    |
 | 3   | `railway add --database postgres` (primary DB for M2)                                             | ☑    |
-| 3b  | Second `railway add --database postgres` (audit DB for M3); rename service in dashboard if helpful | ☐    |
+| 3b  | Second `railway add --database postgres` (audit DB for M3); rename service in dashboard if helpful | ☑    |
 | 4   | **booking-api** service deploys this repo (`railway up` while linked to API, or GitHub)           | ☑    |
 | 5   | Service variables set (see below)                                                                 | ☑    |
 | 6   | Public domain on **booking-api** (Settings → Networking)                                          | ☑    |
 | 7   | `GET /health` returns 200 on public URL ([Verification](#verification))                           | ☑    |
 | 8   | [Account token](https://railway.com/account/tokens) → `RAILWAY_API_TOKEN` on **booking-api** (M4) | ☑    |
 | 9   | [IDs and URLs](#ids-and-urls) filled in below                                                     | ☑    |
+| 10  | **booking-web** service, public domain, and `VITE_API_URL`                                        | ☑    |
+| 11  | `DEMO_ACCESS_TOKEN` protects destructive controls                                                 | ☑    |
 
 
 
@@ -52,7 +107,14 @@ Run from the **monorepo root** (`chaos-eng-demo/`).
 | Setting                 | Value                                                       |
 | ----------------------- | ----------------------------------------------------------- |
 | `NIXPACKS_NODE_VERSION` | `20` or `22` (required — web workspace deps need Node ≥ 20) |
-| `WEB_ORIGIN`            | `http://localhost:5173` for local Vite → deployed API       |
+| `WEB_ORIGIN`            | `https://booking-web-production-2789.up.railway.app`        |
+
+### Build settings (booking-web)
+
+| Setting                 | Value                                                        |
+| ----------------------- | ------------------------------------------------------------ |
+| `NIXPACKS_NODE_VERSION` | `22`                                                         |
+| `VITE_API_URL`          | `https://booking-api-production-25be.up.railway.app`         |
 
 
 
@@ -65,6 +127,7 @@ Run from the **monorepo root** (`chaos-eng-demo/`).
 | `WEB_ORIGIN`        | Yes           | CORS allowlist. M1 local web: `http://localhost:5173`.                                                                                          |
 | `PORT`              | No            | Injected by Railway.                                                                                                                            |
 | `NODE_ENV`          | No            | Often `production`.                                                                                                                             |
+| `DEMO_ACCESS_TOKEN` | **Yes**        | Minimum 16 characters. Shared privately with the demo operator; never expose through `VITE_*`.                                                  |
 | `RAILWAY_API_TOKEN` | M4+ | **Account** → Tokens (workspace that owns this project). Set on **booking-api** for M5+; also used locally for `npm run railway:smoke`. Never commit. |
 | `RAILWAY_ENVIRONMENT_ID` | **Yes (M5+)** | See [IDs and URLs](#ids-and-urls). Required for API boot in M5. |
 | `RAILWAY_PRIMARY_DB_SERVICE_ID` | **Yes (M5+)** | Primary Postgres service ID (stop/restart target). |
@@ -78,8 +141,8 @@ Run from the **monorepo root** (`chaos-eng-demo/`).
 Set variables (linked to **booking-api**):
 
 ```bash
-railway variables set WEB_ORIGIN=http://localhost:5173
-railway variables set RAILWAY_API_TOKEN=<account-token>   # optional until M4
+railway variables set WEB_ORIGIN=https://booking-web-production-2789.up.railway.app
+railway variables set RAILWAY_API_TOKEN=<account-token>
 ```
 
 
@@ -126,7 +189,12 @@ Or connect GitHub in the dashboard and deploy on push.
 ### Deployed booking-api
 
 1. On **booking-api** service variables, set `DATABASE_URL` to reference the Postgres service connection string (Railway variable reference / shared variable from the Postgres plugin).
-2. Run `npm run db:migrate` against that database before the first booking (from your laptop with `apps/api/.env`, or `railway run` while linked to Postgres). M2 does not auto-migrate on deploy.
+2. Run the migration explicitly with the database public URL. `railway run` still
+   executes on your laptop and cannot resolve `*.railway.internal`:
+   ```bash
+   DATABASE_URL="$(railway variables --service Postgres --json |
+     jq -r '.DATABASE_PUBLIC_URL')" npm run db:migrate
+   ```
 3. After deploy, verify on the **public API URL** ([Milestone 2 verification](#milestone-2-verification)).
 
 ---
@@ -147,7 +215,11 @@ Or connect GitHub in the dashboard and deploy on push.
 ### Deployed booking-api
 
 1. On **booking-api** service variables, set `AUDIT_DATABASE_URL` to reference the audit Postgres connection string (variable reference from the second Postgres plugin).
-2. Run `npm run db:migrate:audit` against the audit database before relying on event trails (from laptop with `apps/api/.env`, or `railway run` while linked to audit Postgres).
+2. Run the audit migration explicitly:
+   ```bash
+   AUDIT_DATABASE_URL="$(railway variables --service Postgres-audit-events --json |
+     jq -r '.DATABASE_PUBLIC_URL')" npm run db:migrate:audit
+   ```
 3. After deploy, verify [Milestone 3 verification](#milestone-3-verification).
 
 ---
@@ -160,7 +232,7 @@ Implementation notes: [`IMPLEMENTATION_MILESTONE_4.md`](../IMPLEMENTATION_MILEST
 
 ### Account token on booking-api
 
-Set **`RAILWAY_API_TOKEN`** on the **booking-api** service (same [account token](https://railway.com/account/tokens) as GraphiQL). Required for M5 server-side chaos routes; optional for API boot in M4. **Never commit** the token.
+Set **`RAILWAY_API_TOKEN`** on the **booking-api** service (same [account token](https://railway.com/account/tokens) as GraphiQL). It is required by the current API boot path and server-side chaos routes. **Never commit** the token.
 
 ### Local env (`apps/api/.env`)
 
@@ -173,7 +245,8 @@ Copy placeholders from [`apps/api/.env.example`](../apps/api/.env.example). For 
 | `RAILWAY_PRIMARY_DB_SERVICE_ID` | Yes | Default target: **primary Postgres** |
 | `RAILWAY_PROJECT_ID` | No | Optional; reserved for later milestones |
 
-The API still starts with only `DATABASE_URL` and `AUDIT_DATABASE_URL`; Railway ID vars are read when you run the client or smoke script.
+The current API boot path requires both database URLs, `DEMO_ACCESS_TOKEN`,
+`RAILWAY_API_TOKEN`, the environment ID, and all three service IDs.
 
 ### Smoke script (from repo root)
 
@@ -199,7 +272,9 @@ While primary Postgres is stopped, **`POST /bookings`** should return **503** wi
 
 The Booking API wraps `@hotel-chaos/railway-client` and exposes infrastructure HTTP routes. The browser never holds `RAILWAY_API_TOKEN`. Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos). Implementation: [`IMPLEMENTATION_MILESTONE_5.md`](../IMPLEMENTATION_MILESTONE_5.md).
 
-**`/infrastructure` mutations are unauthenticated.** Stop targets **primary Postgres only**. Bookings return **503** `DATABASE_UNAVAILABLE` until Restart. Audit DB and booking-api are status-only (no stop/restart routes).
+**`/infrastructure` mutations require the demo Bearer token.** Stop targets
+**primary Postgres only**. Bookings return **503** `DATABASE_UNAVAILABLE` until
+Restart. Audit DB and booking-api are status-only (no stop/restart routes).
 
 ### Required Railway vars (API boot)
 
@@ -231,7 +306,8 @@ Local web: `VITE_API_URL=http://localhost:3001` in `apps/web/.env` (restart Vite
 
 The Booking API runs a **full-auto database-outage scenario** server-side. The web app calls HTTP only (no `@hotel-chaos/railway-client` in the browser). Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos) — **Run database outage experiment**. Implementation: [`IMPLEMENTATION_MILESTONE_6.md`](../IMPLEMENTATION_MILESTONE_6.md).
 
-**`/experiments` mutations are unauthenticated** (same posture as M5 `/infrastructure` stop/restart). One experiment at a time (`409` if another is `CREATED` or in flight).
+**`/experiments` mutations require the demo Bearer token.** One experiment at a
+time (`409` if another is `CREATED` or in flight).
 
 ### In-memory store vs durable audit
 
@@ -271,7 +347,9 @@ Manual M5 routes remain for dashboard use; disable Stop/Restart in the UI while 
 
 The Booking API **composes** a chronological timeline from the M6 in-memory envelope plus curated audit rows. The web app polls HTTP only (it does not merge sources in the browser). Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos) — timeline panel below the experiment run. Implementation: [`IMPLEMENTATION_MILESTONE_7.md`](../IMPLEMENTATION_MILESTONE_7.md).
 
-**`GET /experiments/:id/timeline` is unauthenticated** (same posture as M5/M6). `GET /experiments/:id/events` remains the full audit list (`REQUEST_RECEIVED` / `VALIDATION_PASSED` included). The timeline omits those two types.
+**`GET /experiments/:id/timeline` remains a public read endpoint.**
+`GET /experiments/:id/events` remains the full audit list (`REQUEST_RECEIVED` /
+`VALIDATION_PASSED` included). The timeline omits those two types.
 
 No new GraphQL. Timeline “Railway service state” is orchestrator statuses (`STOPPING_DATABASE`, `DATABASE_DOWN`, `RECOVERING_DATABASE`), not live `/infrastructure` poll deltas. M5 cards on `/chaos` stay the live connectivity view.
 
@@ -304,7 +382,8 @@ Poll cadence on `/chaos` matches experiment status (~1s in-flight, else 3s or pa
 
 The Booking API **composes** a summary object from the same merged timeline as M7 (envelope `statusHistory` + curated audit). The web app polls HTTP only; it does **not** derive counts or durations from the timeline array in the browser. Dashboard: [http://localhost:5173/chaos](http://localhost:5173/chaos) — **Recovery metrics** panel below the timeline. Implementation: [`IMPLEMENTATION_MILESTONE_8.md`](../IMPLEMENTATION_MILESTONE_8.md).
 
-**`GET /experiments/:id/metrics` is unauthenticated** (same posture as M5–M7). Metrics are **not persisted** (no `experiments` table).
+**`GET /experiments/:id/metrics` remains a public read endpoint.** Metrics are
+**not persisted** (no `experiments` table).
 
 ### `/metrics` vs `/timeline` vs `/events`
 
@@ -582,10 +661,13 @@ Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Miles
 | Project ID                  | `292daa8f-847a-48e7-9839-d0f5f5c8a111`                                                                   |
 | Environment ID              | `82352c2f-71f9-4a39-93bb-175924d93388`                                                                   |
 | API service ID              | `4d0def26-f608-4358-900a-794949477ee4`                                                                   |
+| Web service ID              | `3ff19e4e-ca04-43c5-a3b0-d59187b54043`                                                                   |
 | Primary Postgres service ID | `c9a59b73-4469-41b2-87a5-a5f0791ba1a6`                                                                   |
 | Audit Postgres service ID   | `2bf5d48e-69d8-40c3-b180-68bb659f9a7e`                                                                   |
 | Public API URL              | [https://booking-api-production-25be.up.railway.app](https://booking-api-production-25be.up.railway.app) |
+| Public web URL              | [https://booking-web-production-2789.up.railway.app](https://booking-web-production-2789.up.railway.app) |
 | `RAILWAY_API_TOKEN`         | **not in git**                                                                                           |
+| `DEMO_ACCESS_TOKEN`         | **not in git; retrieve from booking-api Variables**                                                      |
 
 
 ---
@@ -607,8 +689,10 @@ Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Miles
 | `ENOTFOUND` / `postgres.railway.internal` locally | Use `DATABASE_PUBLIC_URL` in `apps/api/.env` for laptop dev; internal URL only works inside Railway. |
 | `password authentication failed` / `28P01` | Refresh Postgres credentials in Railway; update `apps/api/.env`. |
 | `DATABASE_URL is required` on API start | Set `DATABASE_URL` in `apps/api/.env` (local) or on **booking-api** (deploy). |
+| `DEMO_ACCESS_TOKEN is required` on API start | Set a random value of at least 16 characters on **booking-api** and in local `apps/api/.env`. |
 | `RAILWAY_* is required for the booking API` on start | Set token + environment + three service IDs in `apps/api/.env` (local) and on **booking-api** (deploy). See [IDs and URLs](#ids-and-urls). |
-| CORS / `/infrastructure` to the public API from local Vite | `VITE_API_URL=http://localhost:3001` until M5 is deployed; `WEB_ORIGIN=http://localhost:5173` on the API. |
+| CORS from production web | `WEB_ORIGIN` must exactly match `https://booking-web-production-2789.up.railway.app`; rebuild web after changing `VITE_API_URL`. |
+| Chaos mutation returns `401` | Re-enter the current `DEMO_ACCESS_TOKEN`; a page reload intentionally clears it. |
 | `primary database pool error` after Stop | Expected. Idle clients drop; the API stays up. Next probe should report `STOPPED`. |
 | `auditDatabase: "down"` on `/health` | Audit Postgres unreachable; booking may still succeed but audit trail may be incomplete. |
 | `database: "down"` on `/health` but API is up | DB unreachable or bad credentials; bookings may 500/503 depending on error type. |
@@ -619,6 +703,8 @@ Used by Milestone 4 smoke tests, Milestone 5 `/infrastructure` routes, and Miles
 | `/metrics` 200 but `recoveryTimeSeconds: null` after API restart | Expected partial metrics. Restart-initiated timestamp was envelope-only; counts may still be 2/1/1 with `result: UNKNOWN`. See [Milestone 8 — recovery metrics](#milestone-8--recovery-metrics). |
 | `status: COMPLETED` but metrics `result: RECOVERED` | Expected. Different fields — M6 status vs M8 display enum. |
 
-### Optional — static web on Railway (Milestone 1)
+### Production web on Railway
 
-Static site for `apps/web`: separate service, `npm run build -w web`, serve `apps/web/dist`. Local Vite on `5173` is enough for M1–M2.
+`booking-web` builds the shared package and Vite SPA with `npm run build:web`,
+then serves `apps/web/dist` through `sirv` with SPA fallback. `VITE_API_URL` is
+embedded at build time, so changing it requires a new web deployment.

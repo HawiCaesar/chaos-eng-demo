@@ -6,6 +6,7 @@ const envSchema = z.object({
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
   DATABASE_URL: z.string().optional(),
   AUDIT_DATABASE_URL: z.string().optional(),
+  DEMO_ACCESS_TOKEN: z.string().min(16).optional(),
   RAILWAY_API_TOKEN: z.string().optional(),
   RAILWAY_PROJECT_ID: z.string().optional(),
   RAILWAY_ENVIRONMENT_ID: z.string().optional(),

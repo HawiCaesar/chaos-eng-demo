@@ -9,6 +9,7 @@
     "dev": "concurrently -n web,api \"npm run dev -w apps/web\" \"npm run dev -w apps/api\"",
     "build": "npm run build --workspaces",
     "build:api": "npm run build -w @hotel-chaos/shared && npm run build -w @hotel-chaos/railway-client && npm run build -w api",
+    "build:web": "npm run build -w @hotel-chaos/shared && npm run build -w web",
     "db:migrate": "npm run db:migrate -w api",
     "db:migrate:audit": "npm run db:migrate:audit -w api",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "concurrently": "^9",
+    "railway": "^3.13.1",
     "typescript": "~5.8"
   },
   "engines": {
