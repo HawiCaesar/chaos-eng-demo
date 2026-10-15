@@ -1,5 +1,7 @@
 # Hotel Chaos Simulator
 
+A hotel booking app on Railway that stops and restarts its primary database, records the outage in an audit trail, and shows the timeline and recovery metrics.
+
 Monorepo for the Hotel Chaos Simulator MVP: Vite + React web app and Express API on Railway.
 
 ## Prerequisites
